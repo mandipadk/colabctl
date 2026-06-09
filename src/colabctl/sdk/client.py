@@ -16,6 +16,7 @@ Example::
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from types import TracebackType
 
@@ -127,7 +128,14 @@ class ColabSession:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        if self._owns:
+        if not self._owns:
+            return
+        if exc is not None:
+            # The body already failed; don't let a cleanup error mask the original
+            # exception (the runtime release is best-effort here).
+            with contextlib.suppress(Exception):
+                await self.stop()
+        else:
             await self.stop()
 
 

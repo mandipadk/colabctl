@@ -159,6 +159,8 @@ def assignment_from_wire(d: dict[str, Any]) -> Assignment:
     Handles the wire quirks our domain models intentionally don't: integer
     ``variant``/``machineShape`` and the ``runtimeProxyInfo`` alias.
     """
+    if "endpoint" not in d:
+        raise AllocationError("Backend assignment response is missing the 'endpoint' field.")
     rpi = d.get("runtimeProxyInfo")
     shape = d.get("machineShape")
     return Assignment(
@@ -252,7 +254,16 @@ class ColabBackendClient:
                 f"{resp.request.method} {resp.url}: HTTP {resp.status_code} {resp.text[:300]!r}"
             )
         body = strip_xssi(resp.text)
-        return json.loads(body) if body else None
+        if not body:
+            return None
+        try:
+            parsed: object = json.loads(body)
+        except ValueError as exc:
+            raise TransportError(
+                f"{resp.request.method} {resp.url}: response body was not valid JSON "
+                f"({body[:200]!r})."
+            ) from exc
+        return parsed
 
     async def _request_json(
         self,

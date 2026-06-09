@@ -29,9 +29,12 @@ from colabctl.errors import (
     TransportError,
 )
 from colabctl.models import ExecutionResult, RuntimeSpec, SessionInfo
+from colabctl.observability import get_logger
 from colabctl.transport.base import OutputCallback, TransportAdapter
 
 _T = TypeVar("_T")
+
+_log = get_logger("lifecycle")
 
 #: A hook invoked with (transport, session_name). Used for checkpoint and restore.
 LifecycleHook = Callable[[TransportAdapter, str], Awaitable[None]]
@@ -188,7 +191,10 @@ class RuntimeLifecycleManager:
                 await self._keepalive_tick()
             except _RECLAIM_ERRORS as exc:
                 # Runtime likely reclaimed between ticks — re-assign proactively.
+                _log.warning("keepalive: runtime unavailable, re-assigning (%s)", exc)
                 with contextlib.suppress(*_RECLAIM_ERRORS):
                     await self._reassign(reason=f"keepalive: {exc}")
             except Exception:
-                pass
+                # Never let the background loop die on an unexpected error (e.g. a
+                # bug in a user checkpoint hook), but don't swallow it silently either.
+                _log.exception("keepalive: unexpected error in tick; continuing")
