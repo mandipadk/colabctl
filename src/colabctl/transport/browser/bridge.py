@@ -64,6 +64,10 @@ class _JsonRpcClient:
             raise
         except Exception as exc:
             self._fail_pending(TransportError(f"browser bridge connection lost: {exc}"))
+        else:
+            # Clean peer close: fail any still-pending calls now so callers don't
+            # hang until their per-call timeout fires.
+            self._fail_pending(TransportError("browser bridge connection closed"))
 
     def _fail_pending(self, exc: Exception) -> None:
         for fut in self._pending.values():
@@ -249,12 +253,14 @@ class BrowserBridgeTransport(TransportAdapter):
         from colabctl.models import Accelerator, Variant
 
         acc = result.get("accelerator", "NONE")
+        var = result.get("variant", "")
+        status = result.get("status", "")
         return SessionInfo(
             name=result.get("name", ""),
             endpoint=result.get("endpoint", ""),
             accelerator=Accelerator(acc) if acc in Accelerator.__members__ else Accelerator.NONE,
-            variant=Variant(result["variant"]) if result.get("variant") else Variant.DEFAULT,
-            status=SessionStatus(result["status"])
-            if result.get("status") in SessionStatus.__members__
+            variant=Variant(var) if var in Variant.__members__ else Variant.DEFAULT,
+            status=SessionStatus(status)
+            if status in SessionStatus.__members__
             else SessionStatus.UNKNOWN,
         )
