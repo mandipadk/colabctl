@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **RunPod** IaaS backend (ephemeral GPU pods) and a **papermill-style notebook
+  adapter** (`run_notebook` / `run_notebook_job` — parameter injection, cell-by-cell
+  on a session or as a batch job).
+- **Integration test rig** (`COLABCTL_INTEGRATION=1`) that drives the native kernel
+  against a real local Jupyter server — offline-validates the kernel exec + streaming.
+- **Docs:** per-backend ToS/cost matrix (`docs/backends.md`) and a deployment/operations
+  guide (`docs/deployment.md`).
+
 ## [0.1.0] - 2026-06-08
 
 First public release. Programmatic Google Colab control plus a multi-backend job API.
