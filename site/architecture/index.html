@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Architecture - colabctl</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Architecture";
+        var mkdocs_page_input_path = "architecture.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> colabctl
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../backends/">Backends</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../deployment/">Deployment</a>
+                </li>
+              </ul>
+              <ul class="current">
+                <li class="toctree-l1 current"><a class="reference internal current" href="#">Architecture</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#layers">Layers</a>
+    </li>
+    <li class="toctree-l2"><a class="reference internal" href="#key-decisions">Key decisions</a>
+    </li>
+    </ul>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">colabctl</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Architecture</li>
+    <li class="wy-breadcrumbs-aside">
+          <a href="https://github.com/colabctl/colabctl/edit/master/docs/architecture.md" class="icon icon-github"> Edit on GitHub</a>
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="architecture">Architecture</h1>
+<p>colabctl is layered so the developer/agent surface never depends on a single way of
+reaching Colab. The canonical, exhaustive spec is <a href="https://github.com/colabctl/colabctl/blob/main/SPEC.md"><code>SPEC.md</code></a>;
+binding decisions are in <a href="https://github.com/colabctl/colabctl/blob/main/DIRECTIVES.md"><code>DIRECTIVES.md</code></a>;
+the validation findings (including the keep-alive saga) are in
+<a href="https://github.com/colabctl/colabctl/blob/main/spikes/PHASE0-FINDINGS.md"><code>spikes/PHASE0-FINDINGS.md</code></a>.</p>
+<h2 id="layers">Layers</h2>
+<pre><code>            SDK  ·  CLI  ·  MCP server          (developer + agent surfaces)
+                       │
+        ┌──────────────┴───────────────┐
+   TransportAdapter              Backend (provider abstraction)
+   (interactive runtimes)        (batch jobs: submit/status/logs/result/cancel)
+        │                               │
+   cli · native              colab · modal · vertex  ←  BackendRouter (capability + failover)
+        │
+   auth (ADC) · secrets · observability (logging, retry, spend guard)
+</code></pre>
+<h2 id="key-decisions">Key decisions</h2>
+<ul>
+<li><strong>Sanctioned-default, no CLI lock-in.</strong> The official <code>google-colab-cli</code> is the
+  default Colab transport, but the from-scratch native <code>/tun/m/*</code> transport is a
+  co-equal, opt-in implementation — so the product survives CLI churn.</li>
+<li><strong>Two complementary abstractions.</strong> <code>TransportAdapter</code> models <em>interactive</em> warm-GPU
+  runtimes; <code>Backend</code> models <em>batch</em> jobs. Colab is exposed as both.</li>
+<li><strong>Survivability via routing.</strong> <code>BackendRouter</code> selects by capability and fails over
+  on infrastructure errors (a Colab ban/outage degrades to Modal/Vertex), but never
+  re-runs a job whose user code merely failed.</li>
+<li><strong>Durability over keep-alive.</strong> The Colab keep-alive RPC is unusable under token auth
+  (live-confirmed), so long jobs rely on kernel activity plus checkpoint-to-Drive +
+  automatic re-assign/restore.</li>
+<li><strong>Honest disclosure + spend guards.</strong> Backends report their ToS posture and caveats;
+  paid backends enforce a hard timeout ceiling.</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../deployment/" class="btn btn-neutral float-left" title="Deployment"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+        <span>
+          <a href="https://github.com/colabctl/colabctl" class="fa fa-github" style="color: #fcfcfc"> GitHub</a>
+        </span>
+    
+    
+      <span><a href="../deployment/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
