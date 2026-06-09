@@ -53,6 +53,8 @@ vertex = ["google-cloud-aiplatform>=1.60"]
 hf = ["huggingface_hub>=0.34"]
 kaggle = ["kaggle>=1.6"]
 runpod = ["runpod>=1.6"]
+# Local-Jupyter integration test rig (validate the native kernel path without Colab).
+integration = ["jupyter-server>=2", "ipykernel>=6"]
 all = [
     "colabctl[native,cli,sdk,secrets,mcp,drive,modal,vertex,hf,kaggle,runpod,browser]",
 ]
@@ -125,3 +127,6 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra"
+markers = [
+    "integration: live integration tests needing a local Jupyter server (opt-in via COLABCTL_INTEGRATION=1)",
+]
