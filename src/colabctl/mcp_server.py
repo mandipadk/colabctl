@@ -1,0 +1,209 @@
+"""MCP server exposing colabctl to AI agents (Claude / Codex / any MCP client).
+
+A thin layer over the SDK: each MCP tool maps to a :class:`ColabTools` method that
+returns JSON-friendly data. The tool *logic* lives in ``ColabTools`` (no ``mcp``
+dependency, fully unit-tested); ``build_server`` lazily imports FastMCP and registers
+the tools. Run with ``colabctl-mcp`` (stdio).
+
+Design notes:
+- Agent-allocated runtimes are created with ``keep=True`` — the agent owns the
+  lifecycle and must call ``stop_runtime`` explicitly (an MCP request shouldn't tear
+  down a runtime the agent still wants).
+- Results are plain dicts/strings so they serialize cleanly back to the agent.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from colabctl.backends.base import Backend, JobSpec
+from colabctl.backends.factory import BACKEND_NAMES, build_backend
+from colabctl.errors import ConfigurationError
+from colabctl.models import Accelerator, ExecutionResult, SessionInfo
+from colabctl.sdk.client import ColabClient
+
+SERVER_INSTRUCTIONS = (
+    "Drive Google Colab: allocate GPU runtimes, run code, move files. "
+    "Allocate once, reuse the returned session name across run_code calls, and "
+    "stop_runtime when done. Runtimes are ephemeral — persist important artifacts "
+    "with download_file. Prefer T4 for cheap work; A100/H100 may be unavailable."
+)
+
+
+def _session_dict(info: SessionInfo) -> dict[str, Any]:
+    return {
+        "name": info.name,
+        "endpoint": info.endpoint,
+        "accelerator": info.accelerator.value,
+        "hardware": info.hardware_label,
+        "variant": info.variant.value,
+        "status": info.status.value,
+    }
+
+
+def _result_dict(result: ExecutionResult) -> dict[str, Any]:
+    err = result.error
+    return {
+        "ok": result.ok,
+        "status": result.status,
+        "text": result.text,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "error": (
+            {"ename": err.ename, "evalue": err.evalue, "traceback": err.traceback}
+            if err is not None
+            else None
+        ),
+    }
+
+
+class ColabTools:
+    """The MCP tool implementations, bound to a :class:`ColabClient`."""
+
+    def __init__(self, client: ColabClient) -> None:
+        self._client = client
+
+    async def allocate_runtime(self, gpu: str = "T4", name: str | None = None) -> dict[str, Any]:
+        """Allocate a Colab runtime (kept running) and return its session info."""
+        session = await self._client.allocate(gpu=gpu, name=name, keep=True)
+        info = await session.status() or session.info
+        if info is None:
+            return {"name": session.name, "status": "READY"}
+        return _session_dict(info)
+
+    async def run_code(
+        self, session: str, code: str, timeout: float | None = None
+    ) -> dict[str, Any]:
+        """Run Python ``code`` on an existing runtime; return outputs + status."""
+        result = await self._client.attach(session).run(code, timeout=timeout)
+        return _result_dict(result)
+
+    async def list_runtimes(self) -> list[dict[str, Any]]:
+        """List active runtimes."""
+        return [_session_dict(info) for info in await self._client.list_sessions()]
+
+    async def runtime_status(self, session: str) -> dict[str, Any] | None:
+        """Return one runtime's status, or null if unknown."""
+        info = await self._client.attach(session).status()
+        return _session_dict(info) if info is not None else None
+
+    async def upload_file(self, session: str, local_path: str, remote_path: str) -> str:
+        """Upload a local file to the runtime."""
+        await self._client.attach(session).upload(local_path, remote_path)
+        return f"uploaded {local_path} -> {remote_path}"
+
+    async def download_file(self, session: str, remote_path: str, local_path: str) -> str:
+        """Download a file from the runtime to the local machine."""
+        await self._client.attach(session).download(remote_path, local_path)
+        return f"downloaded {remote_path} -> {local_path}"
+
+    async def stop_runtime(self, session: str) -> str:
+        """Stop a runtime and release it."""
+        await self._client.attach(session).stop()
+        return f"stopped {session}"
+
+
+def _accelerator(gpu: str) -> Accelerator:
+    if gpu.lower() == "none":
+        return Accelerator.NONE
+    try:
+        return Accelerator(gpu.upper())
+    except ValueError as exc:
+        raise ConfigurationError(f"Unknown accelerator {gpu!r}.") from exc
+
+
+class JobTools:
+    """Batch-job MCP tools over the provider abstraction (Colab / Modal / Vertex)."""
+
+    def __init__(self, backend_factory: Callable[[str], Backend] = build_backend) -> None:
+        self._factory = backend_factory
+        self._cache: dict[str, Backend] = {}
+
+    def _backend(self, name: str) -> Backend:
+        if name not in self._cache:
+            self._cache[name] = self._factory(name)
+        return self._cache[name]
+
+    async def run_job(
+        self,
+        backend: str,
+        code: str,
+        gpu: str = "T4",
+        requirements: list[str] | None = None,
+        timeout: int | None = None,
+    ) -> dict[str, Any]:
+        """Run Python ``code`` on a backend (colab/modal/vertex) and return the result."""
+        spec = JobSpec(
+            code=code,
+            accelerator=_accelerator(gpu),
+            requirements=requirements or [],
+            timeout=timeout,
+        )
+        result = await self._backend(backend).run(spec)
+        return {
+            "backend": result.backend,
+            "state": result.state.value,
+            "ok": result.ok,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "error": result.error,
+        }
+
+    async def list_backends(self) -> list[dict[str, Any]]:
+        """List available backends and their capabilities."""
+        out: list[dict[str, Any]] = []
+        for name in BACKEND_NAMES:
+            caps = self._backend(name).capabilities
+            out.append(
+                {
+                    "name": name,
+                    "accelerators": sorted(set(caps.accelerators)),
+                    "tos_posture": caps.tos_posture,
+                    "interactive": caps.interactive,
+                    "notes": caps.notes,
+                }
+            )
+        return out
+
+    async def aclose(self) -> None:
+        for backend in self._cache.values():
+            await backend.aclose()
+
+
+def build_server(
+    client: ColabClient | None = None,
+    *,
+    transport: str = "cli",
+    server_name: str = "colabctl",
+    backend_factory: Callable[[str], Backend] = build_backend,
+) -> Any:
+    """Build a FastMCP server exposing the colabctl tools (lazy ``mcp`` import)."""
+    from mcp.server.fastmcp import FastMCP
+
+    tools = ColabTools(client or ColabClient(transport_name=transport))
+    jobs = JobTools(backend_factory)
+    server = FastMCP(server_name, instructions=SERVER_INSTRUCTIONS)
+
+    # Interactive Colab session tools.
+    server.tool()(tools.allocate_runtime)
+    server.tool()(tools.run_code)
+    server.tool()(tools.list_runtimes)
+    server.tool()(tools.runtime_status)
+    server.tool()(tools.upload_file)
+    server.tool()(tools.download_file)
+    server.tool()(tools.stop_runtime)
+    # Batch-job tools across backends.
+    server.tool()(jobs.run_job)
+    server.tool()(jobs.list_backends)
+    return server
+
+
+def main() -> None:
+    """Console-script entry point: run the MCP server over stdio."""
+    build_server().run()
+
+
+if __name__ == "__main__":
+    main()

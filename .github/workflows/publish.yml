@@ -1,0 +1,26 @@
+name: Publish to PyPI
+
+# Publishes on a version tag (e.g. `v0.1.0`). Uses PyPI Trusted Publishing
+# (GitHub OIDC) — no API token is stored in the repo.
+#
+# One-time setup on PyPI (https://pypi.org/manage/account/publishing/):
+#   project: colabctl · owner: mandipadk · repo: colabctl · workflow: publish.yml
+#   environment: pypi
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    name: build + publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build sdist + wheel
+        run: uv build
+      - name: Publish to PyPI (trusted publishing)
+        run: uv publish --trusted-publishing always

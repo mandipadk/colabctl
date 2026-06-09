@@ -1,0 +1,11 @@
+site_name: colabctl
+site_description: Programmatic control of Google Colab for developers and AI agents.
+repo_url: https://github.com/colabctl/colabctl
+theme:
+  name: readthedocs
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+
+# Build with: uvx mkdocs serve   (or: uvx mkdocs build)
+# Uses a built-in theme, so no extra dependency is required.

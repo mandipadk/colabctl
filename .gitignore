@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Builds
+/dist/
+/build/
+/site/                     # mkdocs output
+
+# Tooling caches
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Spike outputs / local artifacts
+spikes/phase0-results.txt
+spikes/phase0_*.txt
+spikes/phase0_*.png
+
+# Secrets / local config (never commit)
+.env
+*.token.json
