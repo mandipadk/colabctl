@@ -87,7 +87,7 @@ def parse_result_payload(text: str) -> bytes:
         raise SerializationError("Remote result markers not found in kernel output.")
     encoded = text[start + len(RESULT_BEGIN) : end].strip()
     try:
-        return base64.b64decode(encoded)
+        return base64.b64decode(encoded, validate=True)
     except Exception as exc:
         raise SerializationError("Could not decode the remote result payload.") from exc
 

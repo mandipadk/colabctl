@@ -119,7 +119,7 @@ def parse_b64_payload(text: str) -> bytes:
         raise FileTransferError("Download payload markers not found in kernel output.")
     encoded = text[start + len(_B64_BEGIN) : end].strip()
     try:
-        return base64.b64decode(encoded)
+        return base64.b64decode(encoded, validate=True)
     except Exception as exc:
         raise FileTransferError("Could not decode downloaded payload.") from exc
 

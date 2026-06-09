@@ -18,7 +18,23 @@ class BackendRouter:
 
     def __init__(self, backends: list[Backend], *, order: list[str] | None = None) -> None:
         self._backends: dict[str, Backend] = {b.name: b for b in backends}
-        self._order: list[str] = order or [b.name for b in backends]
+        if order is None:
+            ordered = [b.name for b in backends]
+        else:
+            unknown = [n for n in order if n not in self._backends]
+            if unknown:
+                raise ConfigurationError(f"order references unregistered backend(s): {unknown}")
+            # Honor the given order first, then append any registered backend it
+            # omitted so nothing we registered is silently unreachable.
+            ordered = [*order, *(n for n in self._backends if n not in order)]
+        # Dedup while preserving first occurrence: duplicate names would otherwise
+        # make failover re-run the same backend.
+        seen: set[str] = set()
+        self._order: list[str] = []
+        for n in ordered:
+            if n not in seen:
+                seen.add(n)
+                self._order.append(n)
 
     def register(self, backend: Backend) -> None:
         self._backends[backend.name] = backend

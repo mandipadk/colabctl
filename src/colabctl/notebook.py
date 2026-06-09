@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import copy
 import json
+import keyword
 from pathlib import Path
 from typing import Any
 
 from colabctl.backends.base import Backend, JobResult, JobSpec
+from colabctl.errors import ConfigurationError
 from colabctl.models import Accelerator, ExecutionResult
 from colabctl.sdk.client import ColabSession
 
@@ -33,8 +35,8 @@ def code_cells(nb: dict[str, Any]) -> list[str]:
     for cell in nb.get("cells", []):
         if cell.get("cell_type") != "code":
             continue
-        src = cell.get("source", "")
-        text = "".join(src) if isinstance(src, list) else str(src)
+        src = cell.get("source") or ""  # nbformat: str | list[str]; tolerate null/missing
+        text = "".join(str(line) for line in src) if isinstance(src, list) else str(src)
         if text.strip():
             cells.append(text)
     return cells
@@ -44,6 +46,12 @@ def inject_parameters(nb: dict[str, Any], parameters: dict[str, Any]) -> dict[st
     """Return a copy of ``nb`` with a parameters cell injected (papermill semantics)."""
     if not parameters:
         return nb
+    for key in parameters:
+        if not isinstance(key, str) or not key.isidentifier() or keyword.iskeyword(key):
+            raise ConfigurationError(
+                f"Parameter name {key!r} is not a valid Python identifier; "
+                "it cannot be injected as a notebook parameter."
+            )
     nb = copy.deepcopy(nb)
     cells = nb.setdefault("cells", [])
     injected = {
