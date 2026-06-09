@@ -68,6 +68,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
@@ -95,7 +96,8 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 [tool.ruff.lint.per-file-ignores]
 # SIM117: tests nest `async with` where the inner context depends on the outer.
 # RUF012: test-double classes use plain mutable class attributes as shared state.
-"tests/*" = ["ANN", "B011", "SIM117", "RUF012"]
+# RUF001-003: stress tests intentionally use ambiguous/multibyte unicode.
+"tests/*" = ["ANN", "B011", "SIM117", "RUF012", "RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 python_version = "3.11"

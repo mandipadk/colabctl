@@ -64,11 +64,13 @@ def test_memory_store_roundtrip():
 # --- keyring store ----------------------------------------------------------
 
 
-def test_keyring_small_value_stored_directly():
+def test_keyring_small_value_single_item_roundtrip():
     backend = FakeKeyring()
     store = KeyringSecretStore(backend, chunk_size=64)
     store.set("acct", "short")
-    assert backend.store[("colabctl", "acct")] == "short"
+    # stored as one (prefixed) item, not chunked
+    assert backend.store[("colabctl", "acct")] == "colabctl-raw:short"
+    assert all("#" not in username for (_, username) in backend.store)
     assert store.get("acct") == "short"
 
 
@@ -77,10 +79,10 @@ def test_keyring_large_value_is_chunked_and_reassembled():
     store = KeyringSecretStore(backend, chunk_size=4)
     value = "0123456789"  # 10 chars → 3 chunks of size 4
     store.set("acct", value)
-    # Manifest at the account, chunks at acct#0..#2.
+    # Manifest at the account; chunks at sentinel-namespaced keys.
     assert backend.store[("colabctl", "acct")] == "colabctl-chunked:3"
-    assert backend.store[("colabctl", "acct#0")] == "0123"
-    assert backend.store[("colabctl", "acct#2")] == "89"
+    assert backend.store[("colabctl", KeyringSecretStore._chunk_name("acct", 0))] == "0123"
+    assert backend.store[("colabctl", KeyringSecretStore._chunk_name("acct", 2))] == "89"
     assert store.get("acct") == value
 
 

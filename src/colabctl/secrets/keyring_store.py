@@ -20,7 +20,14 @@ from colabctl.secrets.base import (
     split_chunks,
 )
 
+# A single-chunk value is stored under _RAW_PREFIX and a multi-chunk value under
+# _MANIFEST_PREFIX (+ chunks). Prefixing BOTH means a user value that happens to look
+# like a manifest (e.g. literally "colabctl-chunked:3") can never be mis-parsed.
 _MANIFEST_PREFIX = "colabctl-chunked:"
+_RAW_PREFIX = "colabctl-raw:"
+# Chunk keys are namespaced with a NUL-delimited sentinel so a chunk key can never
+# collide with a real account name (e.g. account "acct#0" vs the chunks of "acct").
+_CHUNK_PREFIX = "\x00colabctl-chunk\x00"
 _CHUNK_SEP = "#"
 
 
@@ -65,7 +72,7 @@ class KeyringSecretStore(SecretStore):
         if raw is None:
             return None
         if raw.startswith(_MANIFEST_PREFIX):
-            count = int(raw[len(_MANIFEST_PREFIX) :])
+            count = int(raw[len(_MANIFEST_PREFIX) :])  # safe: we only ever write digits here
             chunks: list[str] = []
             for i in range(count):
                 part = self._backend.get_password(service, self._chunk_name(account, i))
@@ -75,14 +82,16 @@ class KeyringSecretStore(SecretStore):
                     )
                 chunks.append(part)
             return join_chunks(chunks)
-        return raw
+        if raw.startswith(_RAW_PREFIX):
+            return raw[len(_RAW_PREFIX) :]
+        return raw  # value written outside this store (no prefix)
 
     def set(self, account: str, value: str, *, service: str = DEFAULT_SERVICE) -> None:
         # Clear any prior (possibly chunked) value first so we never orphan chunks.
         self.delete(account, service=service)
         chunks = split_chunks(value, self._chunk_size)
         if len(chunks) == 1:
-            self._backend.set_password(service, account, value)
+            self._backend.set_password(service, account, _RAW_PREFIX + value)
             return
         for i, chunk in enumerate(chunks):
             self._backend.set_password(service, self._chunk_name(account, i), chunk)
@@ -104,4 +113,4 @@ class KeyringSecretStore(SecretStore):
 
     @staticmethod
     def _chunk_name(account: str, index: int) -> str:
-        return f"{account}{_CHUNK_SEP}{index}"
+        return f"{_CHUNK_PREFIX}{account}{_CHUNK_SEP}{index}"
