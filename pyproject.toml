@@ -52,8 +52,9 @@ modal = ["modal>=0.64"]
 vertex = ["google-cloud-aiplatform>=1.60"]
 hf = ["huggingface_hub>=0.34"]
 kaggle = ["kaggle>=1.6"]
+runpod = ["runpod>=1.6"]
 all = [
-    "colabctl[native,cli,sdk,secrets,mcp,drive,modal,vertex,hf,kaggle,browser]",
+    "colabctl[native,cli,sdk,secrets,mcp,drive,modal,vertex,hf,kaggle,runpod,browser]",
 ]
 
 [project.scripts]
@@ -116,6 +117,7 @@ module = [
     "websockets.*",
     "huggingface_hub.*",
     "kaggle.*",
+    "runpod.*",
 ]
 ignore_missing_imports = true
 
