@@ -36,7 +36,7 @@ from colabctl.models import (
 )
 from colabctl.sdk import ColabClient, ColabSession, remote
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 __all__ = [
     "Accelerator",

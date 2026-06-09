@@ -6,7 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Added — Phase 1 (core foundation)
+## [0.1.0] - 2026-06-08
+
+First public release. Programmatic Google Colab control plus a multi-backend job API.
+
+### Added
 
 - **Transports** behind a single `TransportAdapter` contract:
   - `cli` — wraps the official `google-colab-cli` (sanctioned default), with a
@@ -24,7 +28,10 @@ All notable changes to this project are documented here. The format follows
   so AI agents can drive Colab, Modal, and Vertex.
 - **Provider abstraction** — `Backend` (submit/status/logs/result/cancel) + a
   capability-routing `BackendRouter` with infra failover, plus the **Colab**,
-  **Modal** (live-validated), and **Vertex** backends.
+  **Modal** (live-validated), **Vertex AI**, **Hugging Face Jobs**, and **Kaggle**
+  backends, wired into the CLI (`colabctl job …`) and MCP.
+- **Browser-bridge transport** (colab-mcp model) — JSON-RPC relay over a local
+  WebSocket; human-in-the-loop, needs live validation.
 - **Runtime-lifecycle manager** — best-effort keep-alive ticks + proactive checkpoint
   + automatic re-assign/restore on idle reclamation.
 - **Drive sync** — `DriveSync` (durable My-Drive file sync via user-OAuth) + lifecycle
@@ -39,7 +46,10 @@ All notable changes to this project are documented here. The format follows
 - The Colab RuntimeService keep-alive RPC is unusable under token auth (live-confirmed);
   long jobs rely on kernel activity + checkpoint/re-assign instead.
 - Vertex stdout is in Cloud Logging (not captured); `result` returns state + a log link.
-- Deferred to Phase 4: HF Jobs / Kaggle / RunPod / hyperscaler backends, a papermill
-  notebook adapter, a billing watchdog, and a docs site.
+- Vertex / Hugging Face / Kaggle backends and the browser-bridge are not yet
+  live-validated (no accounts in CI); their logic is unit-tested against fakes.
+- Still planned: RunPod/vast.ai + hyperscaler backends, a papermill notebook adapter,
+  a `jupyter_http_over_ws` integration test rig, a billing watchdog, and a docs site.
 
-[Unreleased]: https://github.com/colabctl/colabctl/commits/main
+[Unreleased]: https://github.com/mandipadk/colabctl/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mandipadk/colabctl/releases/tag/v0.1.0
