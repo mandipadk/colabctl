@@ -6,17 +6,16 @@ ever touching the Colab website manually.**
 
 ## Install
 
-> Not on PyPI yet — install from GitHub. (PyPI publishing is wired up via a release
-> workflow and will go live on the first tagged release; then `pip install colabctl` works.)
-
 ```bash
 # library (add the extras you need)
-pip install "git+https://github.com/mandipadk/colabctl.git"
-pip install "colabctl[cli,sdk,native,secrets] @ git+https://github.com/mandipadk/colabctl.git"
+pip install colabctl
+pip install "colabctl[cli,sdk,native,secrets]"
 
 # or as a CLI tool — exposes `colabctl` and `colabctl-mcp`
-uv tool install "colabctl[cli,sdk] @ git+https://github.com/mandipadk/colabctl.git"
+uv tool install "colabctl[cli,sdk]"
 ```
+
+Bleeding edge: `pip install "colabctl[all] @ git+https://github.com/mandipadk/colabctl.git"`.
 
 Optional extras: `cli`, `sdk`, `native`, `secrets`, `mcp`, `drive`, `modal`, `vertex`,
 `hf`, `browser` (or `all`).

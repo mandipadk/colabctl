@@ -29,14 +29,13 @@ asyncio.run(main())
 
 ## Install
 
-> Not on PyPI yet — install from GitHub (PyPI publishing is wired up and goes live on
-> the first tagged release; then `pip install colabctl` will work).
-
 ```bash
-pip install "colabctl[cli,sdk,native,secrets] @ git+https://github.com/mandipadk/colabctl.git"
+pip install "colabctl[cli,sdk,native,secrets]"
 # or as a CLI tool (exposes `colabctl` and `colabctl-mcp`):
-uv tool install "colabctl[cli,sdk] @ git+https://github.com/mandipadk/colabctl.git"
+uv tool install "colabctl[cli,sdk]"
 ```
+
+Bleeding edge from source: `pip install "colabctl[all] @ git+https://github.com/mandipadk/colabctl.git"`.
 
 Extras: `cli`, `sdk`, `native`, `secrets`, `mcp`, `drive`, `modal`, `vertex`, `hf`,
 `browser` (or `all`).
