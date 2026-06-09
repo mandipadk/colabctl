@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-08
+
+Hardening release. An intensive adversarial + property-based stress sweep across
+**every** subsystem (the test suite grew 271 → 555) found and fixed a class of
+edge-case bugs; the public API is unchanged.
+
 ### Added
 
 - **RunPod** IaaS backend (ephemeral GPU pods) and a **papermill-style notebook
@@ -15,6 +21,40 @@ All notable changes to this project are documented here. The format follows
   against a real local Jupyter server — offline-validates the kernel exec + streaming.
 - **Docs:** per-backend ToS/cost matrix (`docs/backends.md`) and a deployment/operations
   guide (`docs/deployment.md`).
+- **Property-based test suites** (hypothesis) covering the marshalling, parsing, quoting,
+  and escaping boundaries across the SDK, transports, and backends.
+
+### Fixed
+
+- **Secrets (keyring):** a value literally starting with the chunk-manifest marker, or an
+  account name shaped like an internal chunk key, could corrupt reads — both are now
+  namespaced so neither can collide.
+- **Routing:** `BackendRouter` raised a bare `KeyError` for an unregistered name in
+  `order` and let duplicate names make failover re-run the same backend — now a clear
+  `ConfigurationError` and de-duplicated, with omitted backends kept reachable.
+- **Notebook:** invalid/keyword parameter names produced a confusing remote `SyntaxError`
+  (now a clear local `ConfigurationError`), and a null/missing cell source injected the
+  literal string `"None"` as code (now skipped).
+- **Browser bridge:** a malformed `variant` from the frontend raised an unhandled
+  `ValueError` (now defaults safely, matching accelerator/status handling), and a clean
+  peer disconnect left in-flight JSON-RPC calls hanging until their timeout (now fails
+  fast).
+- **Native client:** a malformed assignment response (no `endpoint`) raised `KeyError` and
+  a non-JSON `200` body raised `json.JSONDecodeError` — both now surface as typed
+  `ColabctlError`s (`AllocationError` / `TransportError`).
+- **SDK:** `ColabSession.__aexit__` could mask a user's exception when cleanup also failed;
+  runtime release is now best-effort while an exception is already propagating (and still
+  surfaces a release failure on a clean exit).
+- **File transfer:** the base64 decoders (kernel download + `@remote` result) now use
+  `validate=True`, so a corrupt payload fails loudly instead of decoding partially.
+
+### Changed
+
+- The runtime-lifecycle keep-alive loop now logs unexpected errors instead of swallowing
+  them silently (e.g. a bug in a user checkpoint hook is now visible).
+- Verified (property tests) that all backend script builders shell-quote user code so it
+  cannot break out of the `python -c`/`bash -lc` argument, and that every backend's
+  provider-state→`JobState` map is exhaustive over the real provider enums.
 
 ## [0.1.0] - 2026-06-08
 
