@@ -7,6 +7,7 @@ import pytest
 from colabctl.backends import (
     ColabBackend,
     HFJobsBackend,
+    KaggleBackend,
     ModalBackend,
     VertexBackend,
 )
@@ -19,6 +20,7 @@ def test_build_known_backends():
     assert isinstance(build_backend("vertex"), VertexBackend)
     assert isinstance(build_backend("colab"), ColabBackend)
     assert isinstance(build_backend("hf"), HFJobsBackend)
+    assert isinstance(build_backend("kaggle"), KaggleBackend)
 
 
 def test_build_unknown_backend_raises():
@@ -33,4 +35,4 @@ def test_build_router_orders_by_names():
 
 
 def test_backend_names_constant():
-    assert BACKEND_NAMES == ("colab", "modal", "vertex", "hf")
+    assert BACKEND_NAMES == ("colab", "modal", "vertex", "hf", "kaggle")

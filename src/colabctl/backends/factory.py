@@ -14,7 +14,7 @@ from colabctl.backends.vertex_backend import VertexBackend
 from colabctl.errors import ConfigurationError
 
 #: Backends available for selection.
-BACKEND_NAMES: tuple[str, ...] = ("colab", "modal", "vertex", "hf")
+BACKEND_NAMES: tuple[str, ...] = ("colab", "modal", "vertex", "hf", "kaggle")
 
 
 def build_backend(
@@ -42,6 +42,10 @@ def build_backend(
         from colabctl.backends.hf_backend import HFJobsBackend
 
         return HFJobsBackend()
+    if key == "kaggle":
+        from colabctl.backends.kaggle_backend import KaggleBackend
+
+        return KaggleBackend()
     raise ConfigurationError(f"Unknown backend {name!r}. Choose from: {', '.join(BACKEND_NAMES)}.")
 
 

@@ -21,6 +21,7 @@ from colabctl.backends.base import (
 )
 from colabctl.backends.colab import ColabBackend
 from colabctl.backends.hf_backend import HFJobsBackend
+from colabctl.backends.kaggle_backend import KaggleBackend
 from colabctl.backends.modal_backend import ModalBackend
 from colabctl.backends.router import BackendRouter
 from colabctl.backends.vertex_backend import VertexBackend
@@ -35,6 +36,7 @@ __all__ = [
     "JobResult",
     "JobSpec",
     "JobState",
+    "KaggleBackend",
     "ModalBackend",
     "VertexBackend",
 ]

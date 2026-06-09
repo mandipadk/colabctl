@@ -51,8 +51,9 @@ drive = ["google-api-python-client>=2.0", "google-auth>=2.49.1"]
 modal = ["modal>=0.64"]
 vertex = ["google-cloud-aiplatform>=1.60"]
 hf = ["huggingface_hub>=0.34"]
+kaggle = ["kaggle>=1.6"]
 all = [
-    "colabctl[native,cli,sdk,secrets,mcp,drive,modal,vertex,hf,browser]",
+    "colabctl[native,cli,sdk,secrets,mcp,drive,modal,vertex,hf,kaggle,browser]",
 ]
 
 [project.scripts]
@@ -114,6 +115,7 @@ module = [
     "googleapiclient.*",
     "websockets.*",
     "huggingface_hub.*",
+    "kaggle.*",
 ]
 ignore_missing_imports = true
 
