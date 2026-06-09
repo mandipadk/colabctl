@@ -34,6 +34,7 @@ from colabctl.models import (
     SessionStatus,
     Variant,
 )
+from colabctl.notebook import notebook_to_script, run_notebook, run_notebook_job
 from colabctl.sdk import ColabClient, ColabSession, remote
 
 __version__ = "0.1.0"
@@ -67,5 +68,8 @@ __all__ = [
     "Variant",
     "__version__",
     "drive_checkpoint_hooks",
+    "notebook_to_script",
     "remote",
+    "run_notebook",
+    "run_notebook_job",
 ]
