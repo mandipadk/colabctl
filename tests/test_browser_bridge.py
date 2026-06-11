@@ -1,140 +1,169 @@
-"""Tests for the browser-bridge JSON-RPC relay + transport mapping (no real browser)."""
+"""Browser-bridge transport over a fake ColabMCP server (no real browser).
+
+The fake speaks the captured ColabMCP protocol and *actually runs* ``run_code_cell`` code
+as a local subprocess, so the transport's execute / upload / download / keep-alive paths
+are exercised end to end (the "VM" filesystem is local here).
+"""
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
+import subprocess
+import sys
 
-import pytest
-
-from colabctl.errors import RuntimeUnavailableError, TransportError
-from colabctl.models import Accelerator, RuntimeSpec, SessionStatus
-from colabctl.transport.browser.bridge import BrowserBridgeTransport, _JsonRpcClient
+from colabctl.models import RuntimeSpec
+from colabctl.transport.browser import BrowserBridgeTransport, McpClient, mcp_text
 
 
-class FakeFrontendWS:
-    """A loopback 'Colab frontend': answers each request via a responder."""
+def _content(text: str, *, is_error: bool = False) -> dict:
+    return {"content": [{"type": "text", "text": text}], "isError": is_error}
 
-    def __init__(self, responder):
-        self._responder = responder
+
+class FakeColabMcpWS:
+    """In-memory ColabMCP server over a fake ws; runs `run_code_cell` code for real."""
+
+    def __init__(self) -> None:
         self._out: asyncio.Queue[str] = asyncio.Queue()
+        self.cells: dict[str, str] = {}
+        self._n = 0
 
     async def send(self, data: str) -> None:
-        req = json.loads(data)
-        try:
-            result = self._responder(req["method"], req.get("params"))
-            msg = {"jsonrpc": "2.0", "id": req["id"], "result": result}
-        except Exception as exc:
-            msg = {"jsonrpc": "2.0", "id": req["id"], "error": str(exc)}
-        await self._out.put(json.dumps(msg))
+        msg = json.loads(data)
+        mid = msg.get("id")
+        if mid is None:  # a notification (e.g. notifications/initialized) — no reply
+            return
+        result = self._dispatch(msg.get("method"), msg.get("params") or {})
+        await self._out.put(json.dumps({"jsonrpc": "2.0", "id": mid, "result": result}))
 
-    def __aiter__(self):
+    def _dispatch(self, method: str, params: dict) -> dict:
+        if method == "initialize":
+            return {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {"listChanged": True}},
+                "serverInfo": {"name": "ColabMCP", "version": "1.0.0"},
+            }
+        if method == "tools/list":
+            names = ("add_code_cell", "update_cell", "run_code_cell", "delete_cell", "get_cells")
+            return {"tools": [{"name": n} for n in names]}
+        if method == "tools/call":
+            return self._call(params.get("name"), params.get("arguments") or {})
+        return {}
+
+    def _call(self, name: str, args: dict) -> dict:
+        if name == "add_code_cell":
+            self._n += 1
+            cid = f"cell-{self._n}"
+            self.cells[cid] = args.get("code", "")
+            return _content(cid)
+        if name == "update_cell":
+            self.cells[args["cellId"]] = args.get("content", "")
+            return _content("ok")
+        if name == "delete_cell":
+            self.cells.pop(args.get("cellId"), None)
+            return _content("ok")
+        if name == "run_code_cell":
+            code = self.cells.get(args["cellId"], "")
+            proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+            return _content(proc.stdout, is_error=proc.returncode != 0)
+        if name == "get_cells":
+            return _content(json.dumps(self.cells))
+        return _content("")
+
+    def __aiter__(self) -> FakeColabMcpWS:
         return self
 
     async def __anext__(self) -> str:
         return await self._out.get()
 
 
-async def test_jsonrpc_correlates_responses():
-    client = _JsonRpcClient(FakeFrontendWS(lambda method, params: {"echo": method}))
+async def _transport() -> tuple[BrowserBridgeTransport, FakeColabMcpWS]:
+    ws = FakeColabMcpWS()
+    client = McpClient(ws)
     client.start()
-    assert await client.call("allocateRuntime", {}) == {"echo": "allocateRuntime"}
-    assert await client.call("execute", {}) == {"echo": "execute"}
+    await client.initialize()
+    return BrowserBridgeTransport(_client=client, open_browser=False), ws
+
+
+# -- McpClient ----------------------------------------------------------------
+
+
+async def test_initialize_reports_colab_mcp_server():
+    ws = FakeColabMcpWS()
+    client = McpClient(ws)
+    client.start()
+    info = await client.initialize()
+    assert info["serverInfo"]["name"] == "ColabMCP"
+    assert client.server_info is not None and client.server_info["version"] == "1.0.0"
+    tools = await client.list_tools()
+    assert "run_code_cell" in {t["name"] for t in tools}
     await client.close()
 
 
-async def test_jsonrpc_error_becomes_transport_error():
-    def responder(method, params):
-        raise ValueError("frontend boom")
-
-    client = _JsonRpcClient(FakeFrontendWS(responder))
-    client.start()
-    with pytest.raises(TransportError):
-        await client.call("execute", {})
-    await client.close()
+def test_mcp_text_extracts_text_content():
+    assert mcp_text(_content("hello")) == "hello"
+    assert mcp_text({"content": [{"type": "image"}]}) == ""
+    assert mcp_text({}) == ""
 
 
-class FakeRpc:
-    def __init__(self, responses):
-        self._responses = responses
-        self.calls: list[tuple[str, dict | None]] = []
-
-    async def call(self, method, params=None, *, timeout=120.0):
-        self.calls.append((method, params))
-        value = self._responses.get(method)
-        return value(params) if callable(value) else value
-
-    async def close(self):
-        pass
+# -- transport ----------------------------------------------------------------
 
 
-def _bridge(responses):
-    return BrowserBridgeTransport(_rpc=FakeRpc(responses), open_browser=False)
+async def test_execute_runs_code_via_run_code_cell():
+    t, _ = await _transport()
+    await t.allocate(RuntimeSpec(name="b"))
+    result = await t.execute("b", "print(6 * 7)")
+    assert result.ok and "42" in result.text
+    await t.aclose()
 
 
-async def test_allocate_maps_session_info():
-    bridge = _bridge(
-        {
-            "allocateRuntime": {
-                "name": "j",
-                "endpoint": "ep-j",
-                "accelerator": "T4",
-                "variant": "GPU",
-                "status": "IDLE",
-            }
-        }
-    )
-    info = await bridge.allocate(RuntimeSpec(accelerator=Accelerator.T4, name="j"))
-    assert info.name == "j"
-    assert info.accelerator is Accelerator.T4
-    assert info.status is SessionStatus.IDLE
+async def test_execute_reuses_one_scratch_cell_per_session():
+    t, _ = await _transport()
+    await t.execute("b", "print(1)")
+    await t.execute("b", "print(2)")
+    assert len(t._cells) == 1  # update, not a new cell each time
+    await t.aclose()
 
 
-async def test_execute_maps_outputs():
-    bridge = _bridge(
-        {
-            "execute": {
-                "status": "ok",
-                "outputs": [{"output_type": "stream", "name": "stdout", "text": "hi"}],
-            }
-        }
-    )
-    result = await bridge.execute("j", "print(1)")
-    assert result.ok
-    assert result.stdout == "hi"
+async def test_error_cell_marks_status_error():
+    t, _ = await _transport()
+    result = await t.execute("b", "import sys; sys.exit(3)")
+    assert not result.ok
+    await t.aclose()
 
 
-async def test_upload_and_download(tmp_path):
-    captured = {}
-
-    def upload(params):
-        captured["upload"] = params
-        return {}
-
-    def download(params):
-        return {"dataB64": base64.b64encode(b"remote-data").decode()}
-
-    bridge = _bridge({"uploadFile": upload, "downloadFile": download})
-    local = tmp_path / "a.txt"
-    local.write_bytes(b"remote-data")
-    await bridge.upload("j", local, "content/a.txt")
-    assert captured["upload"]["remote"] == "content/a.txt"
-    assert base64.b64decode(captured["upload"]["dataB64"]) == b"remote-data"
-
-    dest = tmp_path / "b.txt"
-    await bridge.download("j", "content/a.txt", dest)
-    assert dest.read_bytes() == b"remote-data"
+async def test_upload_download_round_trips(tmp_path):
+    t, _ = await _transport()
+    await t.allocate(RuntimeSpec(name="b"))
+    src = tmp_path / "f.bin"
+    src.write_bytes(b"browser-bytes")
+    remote = str(tmp_path / "remote.bin")  # the fake's "VM" disk is local
+    await t.upload("b", src, remote)
+    dest = tmp_path / "out.bin"
+    await t.download("b", remote, dest)
+    assert dest.read_bytes() == b"browser-bytes"
+    await t.aclose()
 
 
-async def test_operations_require_start():
-    bridge = BrowserBridgeTransport(open_browser=False)  # no rpc injected, not started
-    with pytest.raises(RuntimeUnavailableError):
-        await bridge.allocate(RuntimeSpec(name="j"))
+async def test_keep_alive_runs_a_noop_cell():
+    t, _ = await _transport()
+    await t.keep_alive("b")  # genuine activity in the authenticated session
+    assert t._ka_cell is not None
+    await t.aclose()
 
 
-def test_capabilities_not_headless_and_discloses_status():
+async def test_stop_deletes_scratch_cell():
+    t, ws = await _transport()
+    await t.execute("b", "print(1)")
+    cell_id = t._cells["b"]
+    assert cell_id in ws.cells
+    await t.stop("b")
+    assert cell_id not in ws.cells  # cleaned up via delete_cell
+    assert await t.status("b") is None
+    await t.aclose()
+
+
+async def test_capabilities_advertise_sanctioned_keepalive():
     caps = BrowserBridgeTransport(open_browser=False).capabilities
-    assert caps.headless is False  # needs a browser tab
-    assert caps.interactive is True
-    assert any("not live-validated" in c.lower() for c in caps.caveats)
+    assert caps.keepalive is True  # the one transport that can
+    assert caps.headless is False and caps.notebook_execution is True

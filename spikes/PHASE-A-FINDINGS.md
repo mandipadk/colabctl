@@ -109,11 +109,27 @@ connects to the local WebSocket **as an MCP client**:
   requests with the page's cookies. So it may **not** serve the Track-A keep-alive goal
   (which needs the page to call `KeepAliveAssignment` on our behalf). The decisive evidence
   is what the client declares in `initialize` / asks for — capture it next.
-- **`phase_a_sidecar.py` updated** to negotiate `mcp`, auth via the query token, and answer
-  `initialize`/`tools/list` with valid stubs so the session proceeds and the full handshake
-  is captured. **Next:** re-run, Connect, and paste the `<<<` MCP frames (esp. `initialize`).
-  If the page exposes nothing we can drive, Track A pivots to Track B (cookie/SAPISIDHASH,
-  `phase_a_keepalive.py cookie`) or a userscript/extension.
+- **Role resolved (2026-06-11):** once `mcp` was negotiated, the connection stayed open and
+  Colab's first (and only) frame was `notifications/tools/list_changed` — an MCP
+  *server→client* notification. So **Colab is the MCP server exposing its own tools** and
+  *we* are the client; it was waiting for us to drive `initialize` → `tools/list`. This is
+  the promising direction: if Colab exposes a runtime-control / keep-alive tool through the
+  authenticated page, Track A's keep-alive sidecar is viable.
+- **DECIDED (2026-06-11) — Track A is viable, and it's bigger than keep-alive.** Captured
+  `serverInfo: {name:"ColabMCP", version:"1.0.0"}` and its tools:
+  `add_code_cell`, `add_text_cell`, `update_cell`, `delete_cell`, `move_cell`,
+  `get_cells` (with `includeOutputs`), and **`run_code_cell`** ("Executes the code in the
+  cell … output is returned"). This is a **sanctioned, first-party way to execute code in a
+  Colab runtime through the logged-in browser tab** — exactly the browser-bridge transport
+  (P14), now on the *real* protocol. And it answers the keep-alive question: running a no-op
+  cell is genuine kernel activity in the **authenticated session**, the one principal that
+  can defer idle reclamation (token auth can't) — so the browser transport can honestly
+  report `keepalive=True`.
+- **Build:** `BrowserBridgeTransport` rebuilt on `McpClient` + the ColabMCP tools
+  (`transport/browser/`): execute = add/update + `run_code_cell`; keep-alive = no-op cell;
+  upload/download ride cell exec; `keepalive=True`, `notebook_execution=True`, sanctioned
+  (not opt-in). Corrects P14's guessed JSON-RPC. Caveat: not headless (needs the tab open)
+  and no runtime-terminate tool (close the tab to release the VM).
 
 ## ② Same-`nbh` token refresh → §5.10 ✅ PASS
 
