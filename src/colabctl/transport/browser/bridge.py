@@ -96,7 +96,12 @@ class BrowserBridgeTransport(TransportAdapter):
         )
 
     async def start(self) -> SessionInfo | None:
-        """Start the local MCP server, open a Colab tab, and complete the MCP handshake."""
+        """Start the local MCP server, open a Colab tab, and complete the MCP handshake.
+
+        Idempotent: a no-op if already connected (e.g. an injected client, or re-entry).
+        """
+        if self._client_obj is not None:
+            return None
         try:
             import websockets
         except ImportError as exc:  # pragma: no cover - only without the extra

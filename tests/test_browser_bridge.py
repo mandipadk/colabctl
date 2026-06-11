@@ -167,3 +167,9 @@ async def test_capabilities_advertise_sanctioned_keepalive():
     caps = BrowserBridgeTransport(open_browser=False).capabilities
     assert caps.keepalive is True  # the one transport that can
     assert caps.headless is False and caps.notebook_execution is True
+
+
+async def test_start_is_noop_when_already_connected():
+    t, _ = await _transport()  # already has an injected, connected client
+    assert await t.start() is None  # idempotent — does not import websockets / open a tab
+    await t.aclose()

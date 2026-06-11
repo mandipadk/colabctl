@@ -170,3 +170,29 @@ async def test_quota_returns_ccu_info():
 
 async def test_quota_none_when_unsupported():
     assert await ColabClient(transport=FakeTransport()).quota() is None
+
+
+# -- transport selection + browser start --------------------------------------
+
+
+def test_build_browser_transport():
+    from colabctl.transport.browser import BrowserBridgeTransport
+
+    assert isinstance(ColabClient(transport_name="browser").transport, BrowserBridgeTransport)
+
+
+def test_unknown_transport_message_lists_browser():
+    with pytest.raises(ConfigurationError, match="browser"):
+        ColabClient(transport_name="bogus")
+
+
+async def test_context_manager_starts_transport_when_supported():
+    started: list[bool] = []
+
+    class _Startable(FakeTransport):
+        async def start(self) -> None:
+            started.append(True)
+
+    async with ColabClient(transport=_Startable()):
+        pass
+    assert started == [True]  # browser-style transports get their async start()

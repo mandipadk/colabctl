@@ -52,7 +52,9 @@ class _State:
 @app.callback()
 def _root(
     ctx: typer.Context,
-    transport: str = typer.Option("cli", "--transport", "-t", help="Transport: cli | native"),
+    transport: str = typer.Option(
+        "cli", "--transport", "-t", help="Transport: cli | native | browser"
+    ),
     auth: str = typer.Option("adc", "--auth", help="Auth strategy for the CLI transport"),
     colab_bin: str = typer.Option("colab", "--colab-bin", help="Path to the `colab` executable"),
 ) -> None:

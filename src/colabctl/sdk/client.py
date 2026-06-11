@@ -194,7 +194,11 @@ class ColabClient:
             from colabctl.transport.native import NativeColabTransport
 
             return NativeColabTransport.create(ADCAuthProvider())
-        raise ConfigurationError(f"Unknown transport {name!r}. Use 'cli' or 'native'.")
+        if name == "browser":
+            from colabctl.transport.browser import BrowserBridgeTransport
+
+            return BrowserBridgeTransport()
+        raise ConfigurationError(f"Unknown transport {name!r}. Use 'cli', 'native', or 'browser'.")
 
     @property
     def transport(self) -> TransportAdapter:
@@ -247,6 +251,11 @@ class ColabClient:
         await self._transport.aclose()
 
     async def __aenter__(self) -> ColabClient:
+        # The browser transport needs an async handshake (open a Colab tab, complete MCP)
+        # before use; other transports have no start() and are ready immediately.
+        start = getattr(self._transport, "start", None)
+        if start is not None:
+            await start()
         return self
 
     async def __aexit__(
