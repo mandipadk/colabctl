@@ -1,0 +1,46 @@
+name: colab-canary
+
+# Weekly live canary: detects Google /tun/m/* protocol drift + end-to-end breakage.
+# Opt-in — skips cleanly unless the GOOGLE_ADC_JSON secret is set (an exported ADC
+# `application_default_credentials.json` for a Colab Pro account, scoped per
+# `colabctl auth scopes`). Costs a few compute-unit-minutes per run.
+
+on:
+  schedule:
+    - cron: "0 14 * * 1" # Mondays 14:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate on credentials
+        id: gate
+        env:
+          ADC: ${{ secrets.GOOGLE_ADC_JSON }}
+        run: |
+          if [ -z "$ADC" ]; then
+            echo "GOOGLE_ADC_JSON not set — skipping canary."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install uv
+        if: steps.gate.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Write ADC credentials
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          ADC: ${{ secrets.GOOGLE_ADC_JSON }}
+        run: |
+          mkdir -p "$HOME/.config/gcloud"
+          printf '%s' "$ADC" > "$HOME/.config/gcloud/application_default_credentials.json"
+
+      - name: Run canary
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          COLABCTL_ENABLE_NATIVE: "1"
+          COLABCTL_QUOTA_PROJECT: ${{ secrets.COLABCTL_QUOTA_PROJECT }}
+        run: uv run --extra native python spikes/canary.py

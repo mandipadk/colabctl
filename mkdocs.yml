@@ -8,6 +8,7 @@ nav:
   - Backends: backends.md
   - Deployment: deployment.md
   - Architecture: architecture.md
+  - Plan (1x → 10x): plan.md
 
 # Build with: uvx mkdocs serve   (or: uvx mkdocs build)
 # Uses a built-in theme, so no extra dependency is required.

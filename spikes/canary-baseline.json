@@ -1,0 +1,34 @@
+{
+  "fingerprints": {
+    "assignments": "fe82e7e270e22ac8",
+    "ccu-info": "ff719838eea14d77"
+  },
+  "skeletons": {
+    "assignments": {
+      "assignments": [
+        {
+          "accelerator": "str",
+          "endpoint": "str",
+          "machineShape": "int",
+          "runtimeProxyInfo": {
+            "token": "str",
+            "tokenExpiresInSeconds": "int",
+            "url": "str"
+          },
+          "variant": "int"
+        }
+      ]
+    },
+    "ccu-info": {
+      "assignmentsCount": "int",
+      "consumptionRateHourly": "float",
+      "currentBalance": "float",
+      "eligibleGpus": [
+        "str"
+      ],
+      "eligibleTpus": [
+        "str"
+      ]
+    }
+  }
+}
