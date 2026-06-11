@@ -39,6 +39,6 @@ CI runs exactly this on Python 3.11 / 3.12 / 3.13, plus `uv build`. All four mus
 
 ## Layout
 
-`SPEC.md` is the canonical architecture. `DIRECTIVES.md` records binding decisions.
+`docs/architecture.md` describes the architecture. `DIRECTIVES.md` records binding decisions.
 `spikes/` holds validation runbooks + findings. `src/colabctl/` is the package; see the
 README for the module map.

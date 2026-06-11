@@ -7,8 +7,8 @@ compute units (the Phase 0 discipline):
 
   contents    — Jupyter contents REST API reachable through the runtime proxy?
                 → decides Pillar 3a (chunked REST transfer vs. the chunked-kernel-exec
-                  fallback). DECISIONS.md scored the contents-API 2/AVOID *before* the
-                  proxy header recipe was verified; this re-tests it empirically.
+                  fallback). The pre-verification review scored the contents-API 2/AVOID
+                  *before* the proxy header recipe was verified; this re-tests it empirically.
   kernels     — GET/POST /api/kernels[/{id}/interrupt] reachable through the proxy?
                 → decides §5.3 (cancel/interrupt) and §5.6 (ws reconnect by kernel_id).
   refresh     — does re-running the assign GET pre-flight with the SAME nbh return the

@@ -1,6 +1,6 @@
 # Owner Directives & Locked Decisions
 
-> Recorded 2026-05-31, after the planning workflow. These **govern implementation** and refine (do not replace) [`SPEC.md`](./SPEC.md). Where a build choice is ambiguous, this file wins.
+> Recorded 2026-05-31, after the planning workflow. These **govern implementation**; where a build choice is ambiguous, this file wins.
 
 ## Locked decisions
 

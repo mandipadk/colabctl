@@ -1,6 +1,6 @@
 # Phase 0 — Validation Spikes (runbook)
 
-**Goal:** confirm the load-bearing unknowns *empirically* before we write package code, per [`SPEC.md` §16 / Phase 0](../SPEC.md#16-delivery-roadmap). You run a handful of commands against **your** Colab Pro account and paste back one file. I've already resolved the rest from the open-source CLI/MCP source so you don't have to.
+**Goal:** confirm the load-bearing unknowns *empirically* before we write package code. You run a handful of commands against **your** Colab Pro account and paste back one file. I've already resolved the rest from the open-source CLI/MCP source so you don't have to.
 
 ---
 

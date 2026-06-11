@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "colabctl"
-version = "0.2.0"
+version = "0.3.0"
 description = "Programmatic control of Google Colab for developers and AI agents — allocate GPUs, run code & notebooks, sync files, without the website."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -74,8 +74,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/colabctl/colabctl"
-Documentation = "https://github.com/colabctl/colabctl/blob/main/SPEC.md"
+Homepage = "https://github.com/mandipadk/colabctl"
+Documentation = "https://github.com/mandipadk/colabctl/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/colabctl"]

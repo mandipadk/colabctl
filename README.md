@@ -163,8 +163,8 @@ you're never hostage to an immature dependency), and puts the durable engineerin
   abuse-detection bans by routing elsewhere; and a scheduled **canary** that catches
   Google's protocol drift before users do.
 
-- **The 1x→10x plan:** [`docs/plan.md`](./docs/plan.md) · architecture: [`SPEC.md`](./SPEC.md)
-  · decisions: [`DECISIONS.md`](./DECISIONS.md) · research: [`RESEARCH.md`](./RESEARCH.md)
+- **The 1x→10x plan:** [`docs/plan.md`](./docs/plan.md) · architecture:
+  [`docs/architecture.md`](./docs/architecture.md) · binding decisions: [`DIRECTIVES.md`](./DIRECTIVES.md)
 - **Docs:** [`docs/`](./docs) (`uvx mkdocs serve`)
 - **Contributing:** [`CONTRIBUTING.md`](./CONTRIBUTING.md) · **Roadmap & status:** [`ROADMAP.md`](./ROADMAP.md)
 

@@ -1,8 +1,8 @@
 # Status & Roadmap
 
 colabctl is **alpha**. This is the honest, detailed status behind the README's one-liner.
-The current execution plan and per-phase status is [`docs/plan.md`](./docs/plan.md); the
-foundational spec is [`SPEC.md`](./SPEC.md); decisions are in [`DIRECTIVES.md`](./DIRECTIVES.md);
+The current execution plan and per-phase status is [`docs/plan.md`](./docs/plan.md);
+binding decisions are in [`DIRECTIVES.md`](./DIRECTIVES.md);
 live findings are in [`spikes/PHASE0-FINDINGS.md`](./spikes/PHASE0-FINDINGS.md) and
 [`spikes/PHASE-A-FINDINGS.md`](./spikes/PHASE-A-FINDINGS.md).
 

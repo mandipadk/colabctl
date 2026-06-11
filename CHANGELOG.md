@@ -6,6 +6,63 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-11
+
+The **durability** release. colabctl gains a persistent fabric so sessions and jobs
+survive process exit, disconnects, and runtime reclamation — plus real-size data movement,
+runtime-direct Drive checkpoints, first-class auth UX, and a sanctioned browser transport
+that keeps its runtime alive. (Test suite 555 → 708.)
+
+### Added
+
+- **Persistent state store** (`~/.colabctl/state.json`, atomic write + `flock`): sessions
+  and jobs are durable across processes. A runtime created in one process is **attachable**
+  from another (`colabctl attach`), `stop` is truthful, and `colabctl gc` reclaims orphans.
+  Corruption is quarantined and the on-disk schema is versioned.
+- **Detached jobs** — submit long work that outlives your client. Jobs run as a supervised
+  stdlib process on the VM (the kernel is a *control plane*, not the data plane), so a
+  dropped websocket costs a reconnect, not the job. `colabctl job run --detach`, with
+  `status` / `logs -f` (resumes exactly after a disconnect) / `result` / `cancel` / `list`,
+  mirrored in the SDK and MCP server (`submit_job`, `job_status`, `job_logs`, `job_result`,
+  `cancel_job`).
+- **Auto-resume** (`--resumable`) — a reclaimed runtime is re-allocated and the job
+  relaunched, restoring from its own Drive checkpoint.
+- **Runtime-direct file transfer** over the Jupyter contents/files REST API — chunked
+  upload, ranged streaming download (with fallback) — so real-size inputs/outputs move
+  without the kernel in the data path (`gpu.upload()` / `gpu.download()`).
+- **Runtime-direct Drive checkpoints** — the VM uploads model state straight to **your**
+  Google Drive (resumable upload, ranged restore), no client memory/bandwidth in the path,
+  wired into the lifecycle manager for automatic restore on re-assignment. A short-lived
+  token is injected to a `0600` file on the VM; the ADC quota project is auto-detected.
+- **Auth UX** — `colabctl auth login` (runs the gcloud ADC login with the exact scopes
+  colabctl needs), `auth status` (account · scopes · Drive quota project · what to fix, via
+  tokeninfo introspection), and `auth scopes` (prints the manual command).
+- **Quota & spend guard** — `colabctl quota` shows the compute-unit balance, burn rate, and
+  runway; a pre-allocation **spend guard** refuses to burn a zero-balance account (override
+  with `--yes`), and a 412 on allocation hints at `gc`.
+- **Allocation ladder** — `allocate(gpu="A100,L4,T4")` / `--gpu A100,L4,T4` tries each
+  accelerator in turn.
+- **Browser transport** (`-t browser`) — drives a Colab notebook through Colab's own
+  (live-captured) **ColabMCP** tools via a logged-in tab; the one sanctioned path that keeps
+  its runtime alive (genuine cell activity in the authenticated session). Wired into the CLI
+  and SDK transport selectors.
+- **Interrupt / reconnect / output cap** — `gpu.interrupt()` stops a runaway cell without
+  losing the VM; the native websocket auto-reconnects; kernel stream output is bounded.
+- **Drift canary** — a scheduled GitHub Action fingerprints the upstream Colab protocol and
+  flags structural drift before it reaches users.
+
+### Changed
+
+- Repository URLs standardized to `github.com/mandipadk/colabctl`.
+- Documentation refreshed (architecture, deployment, roadmap, plan) for the durable fabric
+  and the resolved per-transport keep-alive story.
+
+### Removed
+
+- Internal planning artifacts (`SPEC.md`, `RESEARCH.md`, `DECISIONS.md`) are no longer
+  shipped in the repository; the architecture overview lives in `docs/architecture.md`, the
+  execution plan in `docs/plan.md`, and binding decisions in `DIRECTIVES.md`.
+
 ## [0.2.0] - 2026-06-08
 
 Hardening release. An intensive adversarial + property-based stress sweep across

@@ -1,6 +1,6 @@
 site_name: colabctl
 site_description: Programmatic control of Google Colab for developers and AI agents.
-repo_url: https://github.com/colabctl/colabctl
+repo_url: https://github.com/mandipadk/colabctl
 theme:
   name: readthedocs
 nav:

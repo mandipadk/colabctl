@@ -13,7 +13,7 @@
 | # | Decision |
 |---|----------|
 | **D1** | **Do not broaden the backend matrix.** No new backends (Kaggle, RunPod, vast, hyperscalers), no live-validation investment in the deferred ones (HF Jobs live check stays parked), no notebook-parity features (papermill/nbclient adapters), and the CLI-transport parser is **maintenance-only** (track upstream pins; no new features). Modal and Vertex are maintained as-is but not expanded. All engineering effort goes into the Colab core described below. |
-| **D2** | **Keep-alive is a two-track workstream.** The browser keep-alive **sidecar** (Track A, defensible: the user's own logged-in tab, Google's own colab-mcp model) and **cookie/SAPISIDHASH** auth (Track B) are developed **together, both to proper production quality**. This **supersedes** the `1.5 / AVOID` scores for "Reverse-engineered Google cookie + SAPISIDHASH authentication" and "Local browser cookie extraction" in `DECISIONS.md` — elevated by the owner to *opt-in, disclosed-risk, co-developed*. Track B ships behind its own opt-in gate (separate from the native-transport gate), with the DBSC/ToS/ban risks documented first-class, never hidden. |
+| **D2** | **Keep-alive is a two-track workstream.** The browser keep-alive **sidecar** (Track A, defensible: the user's own logged-in tab, Google's own colab-mcp model) and **cookie/SAPISIDHASH** auth (Track B) are developed **together, both to proper production quality**. This **supersedes** the `1.5 / AVOID` scores for "Reverse-engineered Google cookie + SAPISIDHASH authentication" and "Local browser cookie extraction" in the pre-verification viability review — elevated by the owner to *opt-in, disclosed-risk, co-developed*. Track B ships behind its own opt-in gate (separate from the native-transport gate), with the DBSC/ToS/ban risks documented first-class, never hidden. |
 | **D3** | **The 10x thesis:** durability must come from *the runtime and local persistent state*, not from the connection. Sessions survive process exit; jobs survive disconnects and reclamation; checkpoints move real ML state. Keep-alive then becomes an optimization, not an existential dependency — but per D2 we build it properly anyway. |
 
 These extend (do not replace) the locked decisions in `DIRECTIVES.md`: sanctioned default,
@@ -319,7 +319,7 @@ the runtime proxy** — `GET/PUT {proxy_url}/api/contents/<path>` with the alrea
 recipe (`X-Colab-Runtime-Proxy-Token` + `X-Colab-Client-Agent`), using the contents API's chunked
 upload protocol (`chunk: 1..n, -1`) for streaming with bounded memory.
 
-- ⚠ **Contingent on a Phase-A spike:** `DECISIONS.md` scored "Notebook/file sync via Jupyter
+- ⚠ **Contingent on a Phase-A spike:** the pre-verification viability review scored "Notebook/file sync via Jupyter
   Contents API through the proxy" 2/AVOID and "x-colab-tunnel anti-XSS reverse-proxy access"
   2.5/AVOID — those assessments predate the Phase-0 verification of the proxy header recipe, but
   the proxy may still wrap/block non-kernel REST routes. The spike probes `/api/contents` (and
@@ -390,7 +390,7 @@ addition to* (not replacing) kernel-activity pings and checkpoints. Capabilities
   (/`__Secure-3PAPISID`) + the `SID/HSID/SSID/...` set, against
   `colab.pa.googleapis.com/$rpc/.../KeepAliveAssignment`. Exact header/cookie matrix is a Phase-A
   spike deliverable (live-verify; don't trust folklore).
-- **DBSC reality (why `DECISIONS.md` scored this AVOID):** Chrome's Device Bound Session
+- **DBSC reality (why this scored AVOID pre-verification):** Chrome's Device Bound Session
   Credentials rotate/bind cookies to the device, so exported cookies can die fast or off-device.
   Engineering response: health-check loop, explicit `CookieAuthError` taxonomy (expired vs.
   rotated vs. challenged), refresh guidance surfaced to the user, automatic fallback to Track

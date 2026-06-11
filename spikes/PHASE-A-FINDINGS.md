@@ -19,7 +19,7 @@ keep-alive effort but do not gate Pillars 1–3.
   round-trip body intact.
 - **Decision:** **Build Pillar 3a on the Jupyter contents REST API.** The
   chunked-kernel-exec fallback is NOT needed (kept in the plan only as a contingency
-  that did not fire). This overturns `DECISIONS.md`'s pre-verification 2/AVOID score for
+  that did not fire). This overturns the pre-verification 2/AVOID score for
   the contents API.
 - Raw:
   ```json

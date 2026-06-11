@@ -1,10 +1,10 @@
 # Architecture
 
 colabctl is layered so the developer/agent surface never depends on a single way of
-reaching Colab. The canonical, exhaustive spec is [`SPEC.md`](https://github.com/colabctl/colabctl/blob/main/SPEC.md);
-binding decisions are in [`DIRECTIVES.md`](https://github.com/colabctl/colabctl/blob/main/DIRECTIVES.md);
+reaching Colab. The execution plan is in [`docs/plan.md`](https://github.com/mandipadk/colabctl/blob/main/docs/plan.md);
+binding decisions are in [`DIRECTIVES.md`](https://github.com/mandipadk/colabctl/blob/main/DIRECTIVES.md);
 the validation findings (including the keep-alive saga) are in
-[`spikes/PHASE0-FINDINGS.md`](https://github.com/colabctl/colabctl/blob/main/spikes/PHASE0-FINDINGS.md).
+[`spikes/PHASE0-FINDINGS.md`](https://github.com/mandipadk/colabctl/blob/main/spikes/PHASE0-FINDINGS.md).
 
 ## Layers
 
