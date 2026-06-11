@@ -7,8 +7,11 @@ token-auth keep-alive RPC, so a durable long-running session is achieved by
    supports it), to defer idle reclamation while a workload is running;
 2. **proactive checkpoints** — a user-supplied hook runs periodically against the live
    runtime to externalize state (e.g. push to Drive/GCS);
-3. **automatic re-assign + restore** — when the runtime is reclaimed (a call raises a
-   runtime/transport error), allocate a fresh one and run a restore hook, then retry.
+3. **automatic re-assign + restore** — when the runtime is *confirmed* reclaimed,
+   allocate a fresh one and run a restore hook, then retry. Ambiguous transport errors
+   are probed first (the transport's optional ``is_live``) so a network blip never
+   destroys a warm, healthy runtime (§5.4); only a definite or probe-confirmed
+   reclamation triggers the disruptive path.
 
 Checkpoint/restore *content* is pluggable (the manager orchestrates; the hooks decide
 what to persist). It wraps a :class:`TransportAdapter`, so it works over both the CLI
@@ -40,8 +43,14 @@ _log = get_logger("lifecycle")
 LifecycleHook = Callable[[TransportAdapter, str], Awaitable[None]]
 #: Observer invoked on each re-assign with (new_session_name, reason).
 ReassignObserver = Callable[[str, str], None]
+#: Gate consulted before each keep-alive activity ping; return ``False`` to skip the
+#: ping this tick (e.g. while a detached job already keeps the kernel busy — §5.5).
+PingGate = Callable[[], bool]
 
-#: Errors that indicate the runtime is gone and a re-assign should be attempted.
+#: Errors that *may* indicate the runtime is gone. ``RuntimeUnavailableError`` is a
+#: definite reclaim signal (the transport says so); the broader transport/allocation
+#: errors are ambiguous — a network blip raises the same types — so when the transport
+#: can be probed (``is_live``) we check before destroying a warm runtime (plan §5.4).
 _RECLAIM_ERRORS = (RuntimeUnavailableError, AllocationError, TransportError)
 
 
@@ -58,8 +67,10 @@ class RuntimeLifecycleManager:
         restore: LifecycleHook | None = None,
         on_reassign: ReassignObserver | None = None,
         max_reassigns: int = 3,
+        refresh_before_expiry: bool = False,
         reassign_before_expiry: bool = False,
         expiry_margin: float = 120.0,
+        ping_gate: PingGate | None = None,
     ) -> None:
         self._transport = transport
         self._spec = spec
@@ -68,9 +79,12 @@ class RuntimeLifecycleManager:
         self._restore = restore
         self._on_reassign = on_reassign
         self._max_reassigns = max_reassigns
-        # Proactively re-assign before the runtime-proxy token expires (transports that
-        # expose `seconds_until_proxy_expiry`); off by default since re-assign is
-        # disruptive and the reactive on-failure path already covers expiry.
+        self._ping_gate = ping_gate
+        # Near proxy-token expiry, prefer a non-disruptive in-place refresh (transports
+        # exposing `refresh_token`, Phase A §②) over a disruptive re-assign. Both default
+        # off, since the reactive on-failure path already covers expiry; refresh is the
+        # cheap proactive option and is tried first when enabled.
+        self._refresh_before_expiry = refresh_before_expiry
         self._reassign_before_expiry = reassign_before_expiry
         self._expiry_margin = expiry_margin
         self._name: str | None = None
@@ -140,12 +154,56 @@ class RuntimeLifecycleManager:
         self._name = info.name
         return info
 
+    async def _runtime_is_live(self) -> bool | None:
+        """Probe whether the current runtime still exists (``None`` = cannot tell).
+
+        Uses the transport's optional ``is_live`` (the native transport checks the
+        server's assignment list). A missing probe, a probe error, or no active
+        session all return ``None`` — in which case recovery falls back to the
+        probe-less behavior (re-assign).
+        """
+        if self._name is None:
+            return False
+        probe = getattr(self._transport, "is_live", None)
+        if probe is None:
+            return None
+        try:
+            result: bool | None = await probe(self._name)
+        except Exception:  # probe is advisory; its own failure must not mask the error
+            return None
+        return result
+
     async def _with_recovery(self, op: Callable[[], Awaitable[_T]]) -> _T:
+        """Run ``op``, recovering from reclamation — but never from a mere blip.
+
+        - ``RuntimeUnavailableError`` is the transport's definite "runtime gone"
+          signal → re-assign + restore + retry.
+        - Broader transport/allocation errors are ambiguous: when the transport can be
+          probed and the runtime is still live, retry **in place** (the warm runtime —
+          and everything on it — is preserved). If the retry fails again while the
+          runtime remains live, the error is real and is surfaced, not "recovered"
+          into a destructive re-assign.
+        - Without a probe, fall back to re-assign (the pre-§5.4 behavior).
+        """
         try:
             return await op()
-        except _RECLAIM_ERRORS as exc:
+        except RuntimeUnavailableError as exc:
             await self._reassign(reason=f"{type(exc).__name__}: {exc}")
             return await op()  # retry once on the fresh runtime
+        except _RECLAIM_ERRORS as exc:
+            if await self._runtime_is_live():
+                _log.warning(
+                    "recovery: runtime still live after %s; retrying in place", type(exc).__name__
+                )
+                try:
+                    return await op()
+                except _RECLAIM_ERRORS as exc2:
+                    if await self._runtime_is_live():
+                        raise  # runtime is healthy — this is a real error, surface it
+                    await self._reassign(reason=f"{type(exc2).__name__}: {exc2}")
+                    return await op()
+            await self._reassign(reason=f"{type(exc).__name__}: {exc}")
+            return await op()
 
     async def _reassign(self, *, reason: str) -> None:
         self._reassigns += 1
@@ -166,16 +224,35 @@ class RuntimeLifecycleManager:
             self._on_reassign(self.name, reason)
 
     async def _keepalive_tick(self) -> None:
-        """One keep-alive cycle: activity ping, optional checkpoint, expiry check."""
+        """One keep-alive cycle: activity ping, optional checkpoint, expiry check.
+
+        The ping is skipped when the ping gate says so (§5.5: a detached job already
+        keeps the kernel busy, and its poller touches the kernel anyway); checkpoints
+        and the expiry check still run.
+        """
         if self._name is None:
             return
         keep_alive = getattr(self._transport, "keep_alive", None)
-        if keep_alive is not None:
+        if keep_alive is not None and (self._ping_gate is None or self._ping_gate()):
             await keep_alive(self._name)
         if self._checkpoint is not None:
             await self._checkpoint(self._transport, self._name)
-        if self._reassign_before_expiry and self._proxy_expiring_soon():
-            await self._reassign(reason="runtime-proxy token near expiry")
+        if self._proxy_expiring_soon():
+            if self._refresh_before_expiry and await self._try_refresh_token():
+                _log.info("keepalive: refreshed proxy token in place near expiry")
+            elif self._reassign_before_expiry:
+                await self._reassign(reason="runtime-proxy token near expiry")
+
+    async def _try_refresh_token(self) -> bool:
+        """Refresh the proxy token in place if the transport supports it (§5.10)."""
+        refresh = getattr(self._transport, "refresh_token", None)
+        if refresh is None or self._name is None:
+            return False
+        try:
+            return bool(await refresh(self._name))
+        except _RECLAIM_ERRORS as exc:
+            _log.warning("keepalive: in-place token refresh failed (%s); falling back", exc)
+            return False
 
     def _proxy_expiring_soon(self) -> bool:
         expires_in = getattr(self._transport, "seconds_until_proxy_expiry", None)
@@ -190,7 +267,12 @@ class RuntimeLifecycleManager:
             try:
                 await self._keepalive_tick()
             except _RECLAIM_ERRORS as exc:
-                # Runtime likely reclaimed between ticks — re-assign proactively.
+                # Possibly reclaimed between ticks — but a tick can also fail on a
+                # transient blip (or a bounded ping timeout against a busy kernel),
+                # so probe before the disruptive re-assign (§5.4).
+                if await self._runtime_is_live():
+                    _log.warning("keepalive: tick failed but runtime is live (%s); skipping", exc)
+                    continue
                 _log.warning("keepalive: runtime unavailable, re-assigning (%s)", exc)
                 with contextlib.suppress(*_RECLAIM_ERRORS):
                     await self._reassign(reason=f"keepalive: {exc}")

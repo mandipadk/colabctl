@@ -16,7 +16,11 @@ via kernel activity and relies on checkpoint/re-assign for long jobs.
 
 from __future__ import annotations
 
-from colabctl.transport.native.adapter import NativeColabTransport
+from colabctl.transport.native.adapter import (
+    GcReport,
+    NativeColabTransport,
+    ReconcileReport,
+)
 from colabctl.transport.native.client import (
     COLAB_API_DOMAIN,
     COLAB_DOMAIN,
@@ -39,8 +43,10 @@ __all__ = [
     "PUBLIC_API_KEY",
     "PUBLIC_API_KEY_HEADER",
     "ColabBackendClient",
+    "GcReport",
     "NativeColabTransport",
     "NativeKernel",
+    "ReconcileReport",
     "build_assign_params",
     "normalize_output",
     "outputs_to_result",

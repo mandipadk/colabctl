@@ -15,7 +15,7 @@ Design notes:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from colabctl.backends.base import Backend, JobSpec
 from colabctl.backends.factory import BACKEND_NAMES, build_backend
@@ -23,11 +23,18 @@ from colabctl.errors import ConfigurationError
 from colabctl.models import Accelerator, ExecutionResult, SessionInfo
 from colabctl.sdk.client import ColabClient
 
+if TYPE_CHECKING:
+    from colabctl.jobs.backend import DetachedColabBackend
+
 SERVER_INSTRUCTIONS = (
     "Drive Google Colab: allocate GPU runtimes, run code, move files. "
     "Allocate once, reuse the returned session name across run_code calls, and "
     "stop_runtime when done. Runtimes are ephemeral — persist important artifacts "
-    "with download_file. Prefer T4 for cheap work; A100/H100 may be unavailable."
+    "with download_file. Prefer T4 for cheap work; A100/H100 may be unavailable. "
+    "For long-running work, prefer the detached job tools: submit_job returns a job id "
+    "immediately; then poll job_status/job_logs and collect job_result — the job "
+    "survives across calls and disconnects, so do other work between polls instead of "
+    "blocking on run_job."
 )
 
 
@@ -97,6 +104,11 @@ class ColabTools:
         """Download a file from the runtime to the local machine."""
         await self._client.attach(session).download(remote_path, local_path)
         return f"downloaded {remote_path} -> {local_path}"
+
+    async def interrupt_runtime(self, session: str) -> str:
+        """Interrupt the running cell on a runtime without killing it (native transport)."""
+        await self._client.attach(session).interrupt()
+        return f"interrupted {session}"
 
     async def stop_runtime(self, session: str) -> str:
         """Stop a runtime and release it."""
@@ -172,18 +184,91 @@ class JobTools:
             await backend.aclose()
 
 
+def _default_detached_backend() -> DetachedColabBackend:
+    from colabctl.jobs.backend import DetachedColabBackend
+
+    return DetachedColabBackend.create()
+
+
+class DetachedJobTools:
+    """Durable detached-job MCP tools (submit → poll → collect, native Colab)."""
+
+    def __init__(
+        self, backend_factory: Callable[[], DetachedColabBackend] = _default_detached_backend
+    ) -> None:
+        self._factory = backend_factory
+        self._backend: DetachedColabBackend | None = None
+
+    def _b(self) -> DetachedColabBackend:
+        if self._backend is None:
+            self._backend = self._factory()
+        return self._backend
+
+    async def submit_job(
+        self,
+        code: str,
+        gpu: str = "T4",
+        requirements: list[str] | None = None,
+        timeout: int | None = None,
+        resumable: bool = False,
+    ) -> dict[str, Any]:
+        """Submit a durable detached Colab job; returns its id immediately (does not block)."""
+        spec = JobSpec(
+            code=code,
+            accelerator=_accelerator(gpu),
+            requirements=requirements or [],
+            timeout=timeout,
+            resumable=resumable,
+        )
+        info = await self._b().submit(spec)
+        return {"id": info.id, "state": info.state.value, "detail": info.detail}
+
+    async def job_status(self, job_id: str) -> dict[str, Any]:
+        """Current state of a detached job (PENDING/RUNNING/SUCCEEDED/FAILED/CANCELLED)."""
+        info = await self._b().status(job_id)
+        return {"id": info.id, "state": info.state.value, "detail": info.detail}
+
+    async def job_logs(self, job_id: str, offset: int = 0) -> dict[str, Any]:
+        """Incremental logs from ``offset``; pass back the returned offset to continue."""
+        text, new_offset = await self._b().log_tail(job_id, offset=offset)
+        return {"text": text, "offset": new_offset}
+
+    async def job_result(self, job_id: str) -> dict[str, Any]:
+        """Wait for a detached job to finish and return its result."""
+        result = await self._b().result(job_id)
+        return {
+            "id": result.id,
+            "state": result.state.value,
+            "ok": result.ok,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "error": result.error,
+        }
+
+    async def cancel_job(self, job_id: str) -> str:
+        """Cancel a running detached job."""
+        await self._b().cancel(job_id)
+        return f"cancelled {job_id}"
+
+    async def aclose(self) -> None:
+        if self._backend is not None:
+            await self._backend.aclose()
+
+
 def build_server(
     client: ColabClient | None = None,
     *,
     transport: str = "cli",
     server_name: str = "colabctl",
     backend_factory: Callable[[str], Backend] = build_backend,
+    detached_backend_factory: Callable[[], DetachedColabBackend] = _default_detached_backend,
 ) -> Any:
     """Build a FastMCP server exposing the colabctl tools (lazy ``mcp`` import)."""
     from mcp.server.fastmcp import FastMCP
 
     tools = ColabTools(client or ColabClient(transport_name=transport))
     jobs = JobTools(backend_factory)
+    detached = DetachedJobTools(detached_backend_factory)
     server = FastMCP(server_name, instructions=SERVER_INSTRUCTIONS)
 
     # Interactive Colab session tools.
@@ -193,10 +278,17 @@ def build_server(
     server.tool()(tools.runtime_status)
     server.tool()(tools.upload_file)
     server.tool()(tools.download_file)
+    server.tool()(tools.interrupt_runtime)
     server.tool()(tools.stop_runtime)
     # Batch-job tools across backends.
     server.tool()(jobs.run_job)
     server.tool()(jobs.list_backends)
+    # Durable detached-job tools (submit → poll → collect).
+    server.tool()(detached.submit_job)
+    server.tool()(detached.job_status)
+    server.tool()(detached.job_logs)
+    server.tool()(detached.job_result)
+    server.tool()(detached.cancel_job)
     return server
 
 

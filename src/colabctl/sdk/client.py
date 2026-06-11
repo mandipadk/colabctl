@@ -20,7 +20,7 @@ import contextlib
 from pathlib import Path
 from types import TracebackType
 
-from colabctl.errors import ConfigurationError
+from colabctl.errors import AcceleratorUnavailableError, ConfigurationError
 from colabctl.models import (
     Accelerator,
     ExecutionResult,
@@ -44,6 +44,26 @@ def _resolve_accelerator(
                 + ", ".join(a.value for a in Accelerator if a is not Accelerator.NONE)
             ) from exc
     return default
+
+
+def _resolve_ladder(
+    gpu: str | None, accelerator: Accelerator | None, default: Accelerator
+) -> list[Accelerator]:
+    """Parse a single accelerator or a comma-separated *preference ladder*.
+
+    ``"A100,L4,T4"`` → ``[A100, L4, T4]`` (order preserved, dups dropped): allocate tries
+    each in turn so a stockout on the first falls through to the next, instead of failing.
+    """
+    if accelerator is not None:
+        return [accelerator]
+    if gpu is not None and "," in gpu:
+        ladder: list[Accelerator] = []
+        for part in gpu.split(","):
+            acc = _resolve_accelerator(part.strip(), None, default)
+            if acc not in ladder:
+                ladder.append(acc)
+        return ladder
+    return [_resolve_accelerator(gpu, accelerator, default)]
 
 
 class ColabSession:
@@ -116,6 +136,15 @@ class ColabSession:
             )
         await fn(self._name)
 
+    async def interrupt(self) -> None:
+        """Interrupt the running cell without killing the runtime (native transport only)."""
+        fn = getattr(self._transport, "interrupt", None)
+        if fn is None:
+            raise NotImplementedError(
+                f"The {self._transport.name!r} transport cannot interrupt a running cell."
+            )
+        await fn(self._name)
+
     async def stop(self) -> None:
         await self._transport.stop(self._name)
 
@@ -181,12 +210,20 @@ class ColabClient:
     ) -> ColabSession:
         """Allocate a runtime and return a :class:`ColabSession`.
 
-        ``keep=True`` leaves the runtime running when the session context exits.
+        ``gpu`` may be a comma-separated *preference ladder* (e.g. ``"A100,L4,T4"``):
+        each is tried in order and a stockout/entitlement failure on one falls through
+        to the next. ``keep=True`` leaves the runtime running when the context exits.
         """
-        acc = _resolve_accelerator(gpu, accelerator, default=Accelerator.T4)
-        spec = RuntimeSpec(accelerator=acc, name=name)
-        info = await self._transport.allocate(spec)
-        return ColabSession(self._transport, info.name, info=info, owns=not keep)
+        ladder = _resolve_ladder(gpu, accelerator, default=Accelerator.T4)
+        last: AcceleratorUnavailableError | None = None
+        for acc in ladder:
+            try:
+                info = await self._transport.allocate(RuntimeSpec(accelerator=acc, name=name))
+                return ColabSession(self._transport, info.name, info=info, owns=not keep)
+            except AcceleratorUnavailableError as exc:
+                last = exc  # try the next rung of the ladder
+        assert last is not None  # the loop ran ≥1 time; a success returns above
+        raise last
 
     def attach(self, name: str) -> ColabSession:
         """Attach to an existing session by name (never auto-stops it)."""
@@ -194,6 +231,17 @@ class ColabClient:
 
     async def list_sessions(self) -> list[SessionInfo]:
         return await self._transport.list_sessions()
+
+    async def quota(self) -> object | None:
+        """Best-effort Colab compute-unit info (native transport only; ``None`` otherwise).
+
+        The shape is undocumented, so it is returned as-is for the caller to surface.
+        """
+        fn = getattr(self._transport, "ccu_info", None)
+        if fn is None:
+            return None
+        result: object | None = await fn()
+        return result
 
     async def aclose(self) -> None:
         await self._transport.aclose()

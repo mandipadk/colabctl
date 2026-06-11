@@ -4,10 +4,26 @@ from __future__ import annotations
 
 import pytest
 
-from colabctl.errors import ConfigurationError
+from colabctl.errors import AcceleratorUnavailableError, ConfigurationError
 from colabctl.models import Accelerator
 from colabctl.sdk import ColabClient
+from colabctl.sdk.client import _resolve_ladder
 from conftest import FakeTransport
+
+
+class _LadderTransport(FakeTransport):
+    """Raises AcceleratorUnavailableError for a configured set of accelerators."""
+
+    def __init__(self, *, unavailable: set[Accelerator]) -> None:
+        super().__init__()
+        self._unavailable = unavailable
+        self.attempted: list[Accelerator] = []
+
+    async def allocate(self, spec):
+        self.attempted.append(spec.accelerator)
+        if spec.accelerator in self._unavailable:
+            raise AcceleratorUnavailableError("no quota", accelerator=spec.accelerator.value)
+        return await super().allocate(spec)
 
 
 async def test_allocate_returns_session_with_info():
@@ -90,6 +106,13 @@ async def test_keep_alive_via_native_only():
     assert t.keepalives == ["j"]
 
 
+async def test_interrupt_delegates_to_transport():
+    t = FakeTransport()
+    session = ColabClient(transport=t).attach("j")
+    await session.interrupt()
+    assert t.interrupts == ["j"]
+
+
 async def test_list_sessions():
     t = FakeTransport()
     client = ColabClient(transport=t)
@@ -102,3 +125,48 @@ async def test_list_sessions():
 def test_unknown_transport_name_raises():
     with pytest.raises(ConfigurationError):
         ColabClient(transport_name="bogus")
+
+
+# -- allocation ladder (§5.2) -------------------------------------------------
+
+
+def test_resolve_ladder_parses_csv_and_dedups():
+    assert _resolve_ladder("A100,L4,T4", None, Accelerator.T4) == [
+        Accelerator.A100,
+        Accelerator.L4,
+        Accelerator.T4,
+    ]
+    assert _resolve_ladder("T4", None, Accelerator.T4) == [Accelerator.T4]
+    assert _resolve_ladder(None, Accelerator.A100, Accelerator.T4) == [Accelerator.A100]
+    assert _resolve_ladder("A100, A100 ,T4", None, Accelerator.T4) == [
+        Accelerator.A100,
+        Accelerator.T4,
+    ]
+
+
+async def test_allocate_ladder_falls_through_stockout():
+    t = _LadderTransport(unavailable={Accelerator.A100, Accelerator.L4})
+    session = await ColabClient(transport=t).allocate(gpu="A100,L4,T4", keep=True)
+    assert session.info is not None and session.info.accelerator is Accelerator.T4
+    assert t.attempted == [Accelerator.A100, Accelerator.L4, Accelerator.T4]
+
+
+async def test_allocate_ladder_all_unavailable_raises_last():
+    t = _LadderTransport(unavailable={Accelerator.A100, Accelerator.H100})
+    with pytest.raises(AcceleratorUnavailableError):
+        await ColabClient(transport=t).allocate(gpu="A100,H100")
+
+
+# -- quota --------------------------------------------------------------------
+
+
+async def test_quota_returns_ccu_info():
+    class _Ccu(FakeTransport):
+        async def ccu_info(self):
+            return {"computeUnits": 42.5}
+
+    assert await ColabClient(transport=_Ccu()).quota() == {"computeUnits": 42.5}
+
+
+async def test_quota_none_when_unsupported():
+    assert await ColabClient(transport=FakeTransport()).quota() is None

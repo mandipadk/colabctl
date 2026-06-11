@@ -26,6 +26,8 @@ from colabctl.errors import (
     AcceleratorUnavailableError,
     AllocationError,
     KeepAliveError,
+    KernelError,
+    RuntimeUnavailableError,
     TooManyAssignmentsError,
     TransportError,
 )
@@ -314,6 +316,38 @@ class ColabBackendClient:
             raise AllocationError("Unexpected assign POST response (not an object).")
         return assignment_from_wire(post)
 
+    async def refresh_assignment(
+        self,
+        notebook_id: uuid.UUID,
+        *,
+        accelerator: Accelerator = Accelerator.T4,
+    ) -> Assignment:
+        """Reattach to an existing runtime by notebook id, minting a fresh proxy token.
+
+        Runs ONLY the assign GET pre-flight with the given ``nbh`` — it never POSTs, so
+        it cannot accidentally allocate a new runtime. If the runtime still exists the
+        backend returns it directly with a *fresh* ``runtimeProxyInfo`` (live-verified
+        Phase A §②: same endpoint, new token); if it has been reclaimed the pre-flight
+        returns only an XSRF token (the prelude to a *new* allocation), which we refuse
+        with :class:`RuntimeUnavailableError` instead of silently re-allocating.
+
+        This is the primitive behind native cross-process *attach* and the
+        non-disruptive proxy-token refresh (plan §5.10).
+        """
+        nbh = web_safe_nbh(notebook_id)
+        variant = Variant.for_accelerator(accelerator)
+        params = build_assign_params(nbh, variant=variant, accelerator=accelerator)
+        url = f"{self._domain}{ASSIGN_PATH}"
+        pre = await self._request_json("GET", url, params=params)
+        if not isinstance(pre, dict):
+            raise AllocationError("Unexpected assign GET response (not an object).")
+        if "endpoint" in pre and "runtimeProxyInfo" in pre:
+            return assignment_from_wire(pre)
+        raise RuntimeUnavailableError(
+            "No live assignment for this notebook id — the runtime was reclaimed "
+            "(refusing to allocate a new one during reattach)."
+        )
+
     async def list_assignments(self) -> list[Assignment]:
         url = f"{self._domain}{ASSIGNMENTS_PATH}"
         body = await self._request_json("GET", url)
@@ -335,6 +369,53 @@ class ColabBackendClient:
         token = pre.get("token") if isinstance(pre, dict) else None
         headers = {XSRF_HEADER: token} if token else {}
         await self._request_json("POST", url, headers=headers)
+
+    async def proxy_request(
+        self,
+        method: str,
+        proxy_url: str,
+        path: str,
+        *,
+        proxy_token: str,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        json_body: object | None = None,
+        content: bytes | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        """Issue a request to a runtime's Jupyter proxy (header-only proxy-token auth).
+
+        The runtime proxy authenticates with the ``X-Colab-Runtime-Proxy-Token`` header
+        (verified header-only in Phase A §①), NOT the OAuth bearer the assign/unassign
+        endpoints use — so this deliberately does not route through ``_send``. It is the
+        shared primitive for kernel interrupt (§5.3) and the contents-API file transfer
+        (Pillar 3a). Returns the response as-is so callers map status codes themselves.
+        """
+        url = f"{proxy_url.rstrip('/')}/{path.lstrip('/')}"
+        merged = {**self.proxy_kernel_headers(proxy_token), **(headers or {})}
+        kwargs: dict[str, Any] = {"params": params, "headers": merged}
+        if json_body is not None:
+            kwargs["json"] = json_body
+        if content is not None:
+            kwargs["content"] = content
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return await self._http.request(method, url, **kwargs)
+
+    async def interrupt_kernel(self, proxy_url: str, kernel_id: str, *, proxy_token: str) -> None:
+        """Interrupt the running cell on a kernel via the proxy REST API.
+
+        Live-verified in Phase A §④ (HTTP 204). Lets an agent stop a runaway cell
+        without killing the whole runtime.
+        """
+        resp = await self.proxy_request(
+            "POST", proxy_url, f"/api/kernels/{kernel_id}/interrupt", proxy_token=proxy_token
+        )
+        if resp.status_code not in (200, 204):
+            raise KernelError(
+                f"interrupt of kernel {kernel_id} failed: "
+                f"HTTP {resp.status_code} {resp.text[:200]!r}"
+            )
 
     async def keep_alive(self, endpoint: str, *, use_bearer: bool = False) -> None:
         """Send one KeepAliveAssignment RPC.

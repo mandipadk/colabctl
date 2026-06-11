@@ -26,6 +26,16 @@ class SecretStoreError(ColabctlError):
     """The secret store could not read/write a credential."""
 
 
+class StateError(ColabctlError):
+    """The persistent state store could not be read, parsed, or written.
+
+    Raised for unrecoverable conditions (e.g. a state document written by a newer
+    colabctl whose schema this version cannot safely downgrade). Recoverable
+    corruption is quarantined and a fresh document returned instead — see
+    :mod:`colabctl.state.store`.
+    """
+
+
 class AuthError(ColabctlError):
     """Authentication or credential acquisition/refresh failed."""
 
@@ -138,6 +148,13 @@ class ExecutionTimeoutError(ExecutionError):
 
 class FileTransferError(ColabctlError):
     """Uploading to / downloading from a runtime (or Drive) failed."""
+
+
+# --- detached jobs ------------------------------------------------------------
+
+
+class JobError(ColabctlError):
+    """A detached-job operation (launch/poll/tail/cancel) failed on the runtime."""
 
 
 # --- SDK --------------------------------------------------------------------

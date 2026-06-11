@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +21,29 @@ from colabctl.models import ExecutionResult, RuntimeSpec, SessionInfo, SessionSt
 from colabctl.transport.base import Capabilities, OutputCallback, TransportAdapter
 
 
+@pytest.fixture(autouse=True)
+def _isolate_colabctl_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the colabctl state store at a per-test temp dir.
+
+    The native transport now persists every allocation under ``$COLABCTL_HOME`` — this
+    autouse fixture keeps that out of the developer's real ``~/.colabctl`` and makes
+    state hermetic across tests (each test gets its own empty store).
+    """
+    monkeypatch.setenv("COLABCTL_HOME", str(tmp_path / "colabctl-home"))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_secret_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let tests touch the real OS keychain.
+
+    The native transport defaults to discovering an OS keychain to cache proxy tokens;
+    in tests we force "no default store" so ``secrets=None`` means *no cache* (attach
+    takes the refresh path). Tests that exercise the cached path pass an explicit
+    in-memory store.
+    """
+    monkeypatch.setattr("colabctl.transport.native.adapter._try_default_secrets", lambda: None)
+
+
 class FakeTransport(TransportAdapter):
     """In-memory TransportAdapter for SDK/CLI tests (no network, no subprocess)."""
 
@@ -30,6 +56,7 @@ class FakeTransport(TransportAdapter):
         self.downloaded: list[tuple[str, str, str]] = []
         self.stopped: list[str] = []
         self.keepalives: list[str] = []
+        self.interrupts: list[str] = []
         self.closed = False
         self._execute_text = execute_text
 
@@ -85,6 +112,9 @@ class FakeTransport(TransportAdapter):
     async def keep_alive(self, name: str) -> None:
         self.keepalives.append(name)
 
+    async def interrupt(self, name: str) -> None:
+        self.interrupts.append(name)
+
     async def aclose(self) -> None:
         self.closed = True
 
@@ -92,6 +122,31 @@ class FakeTransport(TransportAdapter):
 @pytest.fixture
 def fake_transport() -> FakeTransport:
     return FakeTransport()
+
+
+class LocalExecTransport(FakeTransport):
+    """A transport whose ``execute`` runs the payload as a real local subprocess.
+
+    Lets the detached-job substrate (which emits pure-stdlib Python) be exercised
+    end-to-end and hermetically — same code paths the native transport runs on Colab,
+    minus the network. ``allocate`` etc. come from :class:`FakeTransport`.
+    """
+
+    name = "localexec"
+
+    async def execute(self, name, code, *, timeout=None, on_output=None) -> ExecutionResult:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        status = "ok" if proc.returncode == 0 else "error"
+        outputs = [StreamOutput(name="stdout", text=proc.stdout)]
+        if proc.stderr:
+            outputs.append(StreamOutput(name="stderr", text=proc.stderr))
+        return ExecutionResult(status=status, outputs=outputs)
 
 
 class FakeBackend(Backend):

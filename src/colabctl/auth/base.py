@@ -44,6 +44,16 @@ class AuthProvider(abc.ABC):
         """Return the authenticated account email if known (best-effort)."""
         return None
 
+    @property
+    def quota_project_id(self) -> str | None:
+        """The GCP quota project bound to these credentials, if any.
+
+        Per-user (ADC) credentials need a quota project with the Drive API enabled or
+        Drive returns 403; providers that know theirs expose it here so the Drive
+        checkpointer can use it without the caller passing it explicitly.
+        """
+        return None
+
     def as_token_callable(self) -> TokenCallable:
         """Adapt to the ``TokenProvider`` callable the native client expects."""
         return self.token

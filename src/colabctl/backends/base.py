@@ -47,6 +47,10 @@ class JobSpec(BaseModel):
     env: dict[str, str] = {}
     timeout: int | None = None
     name: str | None = None
+    #: Whether the workload resumes idempotently from its own checkpoint after a
+    #: runtime re-assign — the opt-in that lets the lifecycle manager auto-resume a
+    #: detached job on reclamation (plan Pillar 2) rather than failing it.
+    resumable: bool = False
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> JobSpec:

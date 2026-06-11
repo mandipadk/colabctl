@@ -68,10 +68,17 @@ class ColabBackend(Backend):
             accelerators=["T4", "L4", "G4", "A100", "H100"],
             interactive=caps.interactive,
             streaming_logs=False,
-            persistent=True,
+            # Honest until the detached-job manager lands (plan Pillar 2): job records
+            # are in-process today, so nothing about a job survives this process.
+            persistent=False,
             requires_account=True,
             tos_posture="sanctioned" if self._transport.name == "cli" else "gray-area",
-            notes=[f"via the {self._transport.name!r} transport", *caps.caveats],
+            notes=[
+                f"via the {self._transport.name!r} transport",
+                "Job records are in-process: they do not survive the submitting process "
+                "(durable detached jobs are planned — docs/plan.md Pillar 2).",
+                *caps.caveats,
+            ],
         )
 
     async def submit(self, spec: JobSpec) -> JobInfo:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 from collections.abc import Callable
 
+import httpx
+
 from colabctl.models import (
     Accelerator,
     Assignment,
@@ -35,6 +37,7 @@ class FakeClient:
         self.unassigned: list[str] = []
         self.keepalives: list[str] = []
         self.last_accelerator: Accelerator | None = None
+        self.fs: dict[str, bytes] = {}  # in-memory contents API ("path" -> bytes)
 
     async def assign(self, *, accelerator=Accelerator.T4, notebook_id=None) -> Assignment:
         self.last_accelerator = accelerator
@@ -48,6 +51,36 @@ class FakeClient:
 
     async def keep_alive(self, endpoint: str, *, use_bearer: bool = False) -> None:
         self.keepalives.append(endpoint)
+
+    async def proxy_request(
+        self,
+        method,
+        proxy_url,
+        path,
+        *,
+        proxy_token,
+        params=None,
+        headers=None,
+        json_body=None,
+        content=None,
+        timeout=None,
+    ) -> httpx.Response:
+        # Simulate just enough of the Jupyter contents API; force the download fallback
+        # by 404-ing /files/ (the ranged path is covered in test_contents.py).
+        if path.startswith("/files/"):
+            return httpx.Response(404)
+        key = path[len("/api/contents/") :]
+        if method == "PUT":
+            data = base64.b64decode(json_body["content"])
+            chunk = json_body.get("chunk")
+            self.fs[key] = data if chunk in (None, 1) else self.fs.get(key, b"") + data
+            return httpx.Response(201)
+        if (params or {}).get("content") == "0":
+            return httpx.Response(200, json={"size": len(self.fs.get(key, b""))})
+        return httpx.Response(
+            200,
+            json={"format": "base64", "content": base64.b64encode(self.fs.get(key, b"")).decode()},
+        )
 
 
 class FakeKernel:
@@ -111,30 +144,19 @@ async def test_execute_lazily_starts_kernel():
     assert kernels[0].codes == ["print(1)"]
 
 
-async def test_upload_checks_sentinel(tmp_path):
-    def responder(code: str) -> ExecutionResult:
-        ok = "COLABCTL_UPLOAD_OK" in code
-        return ExecutionResult(
-            status="ok",
-            outputs=[StreamOutput(name="stdout", text="COLABCTL_UPLOAD_OK\n" if ok else "")],
-        )
-
-    transport, _, _ = _transport(responder)
+async def test_upload_via_contents_api(tmp_path):
+    transport, client, _ = _transport()
     await transport.allocate(RuntimeSpec(name="job1"))
     local = tmp_path / "f.txt"
-    local.write_text("payload")
-    await transport.upload("job1", local, "content/f.txt")  # should not raise
+    local.write_bytes(b"payload-bytes")
+    await transport.upload("job1", local, "content/f.txt")
+    assert client.fs["content/f.txt"] == b"payload-bytes"  # landed via contents PUT
 
 
-async def test_download_writes_decoded_payload(tmp_path):
-    encoded = base64.b64encode(b"remote-bytes").decode()
-
-    def responder(code: str) -> ExecutionResult:
-        text = f"<<<COLABCTL_B64>>>{encoded}<<<COLABCTL_END>>>\n"
-        return ExecutionResult(status="ok", outputs=[StreamOutput(name="stdout", text=text)])
-
-    transport, _, _ = _transport(responder)
+async def test_download_via_contents_api(tmp_path):
+    transport, client, _ = _transport()
     await transport.allocate(RuntimeSpec(name="job1"))
+    client.fs["content/x.bin"] = b"remote-bytes"
     dest = tmp_path / "out.bin"
     await transport.download("job1", "content/x.bin", dest)
     assert dest.read_bytes() == b"remote-bytes"

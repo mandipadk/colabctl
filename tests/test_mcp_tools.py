@@ -71,3 +71,11 @@ async def test_stop_runtime():
     msg = await tools.stop_runtime("j")
     assert msg == "stopped j"
     assert t.stopped == ["j"]
+
+
+async def test_interrupt_runtime():
+    tools, t = _tools()
+    await tools.allocate_runtime(name="j")
+    msg = await tools.interrupt_runtime("j")
+    assert msg == "interrupted j"
+    assert t.interrupts == ["j"]

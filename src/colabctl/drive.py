@@ -19,7 +19,13 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from colabctl import drive_runtime
+from colabctl.auth.base import AuthProvider
+from colabctl.errors import FileTransferError
+from colabctl.observability import get_logger
 from colabctl.transport.base import TransportAdapter
+
+_log = get_logger("drive")
 
 DRIVE_SCOPES = ("https://www.googleapis.com/auth/drive.file",)
 _FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -216,3 +222,137 @@ def drive_checkpoint_hooks(
                     local.unlink()
 
     return checkpoint, restore
+
+
+# --- runtime-direct checkpoints (Pillar 3b) ---------------------------------
+
+
+class DriveCheckpointer:
+    """Checkpoint/restore between a runtime's local disk and Drive — runtime-direct.
+
+    Unlike :func:`drive_checkpoint_hooks` (which double-hops every byte through the
+    client), this injects a short-lived Drive token to the VM and runs the transfer
+    *there* (:mod:`colabctl.drive_runtime`), so checkpointing GB-scale weights never
+    touches client memory or bandwidth. Built on the transport's ``execute`` only, so it
+    works over any transport that runs Python on the runtime (native is the host).
+
+    **Security:** the injected token is whatever ``auth`` yields. With ADC user
+    credentials that token carries the full granted scope set (which includes
+    ``drive.file`` — files the app created — but also the other Colab scopes); there is
+    no clean way to mint a ``drive.file``-only access token from a broad user grant.
+    The token is short-lived, re-injected each checkpoint, written ``0600``, and never
+    logged. For strict least-privilege, pass an ``auth`` backed by a credential granted
+    only ``drive.file``.
+    """
+
+    def __init__(
+        self,
+        auth: AuthProvider,
+        *,
+        folder: str = drive_runtime.DEFAULT_FOLDER,
+        token_path: str = drive_runtime.DEFAULT_TOKEN_PATH,
+        api_base: str = drive_runtime.DEFAULT_API_BASE,
+        upload_base: str = drive_runtime.DEFAULT_UPLOAD_BASE,
+        quota_project: str | None = None,
+        chunk_size: int | None = None,
+    ) -> None:
+        self._auth = auth
+        self._folder = folder
+        self._token_path = token_path
+        self._api_base = api_base
+        self._upload_base = upload_base
+        # Quota project (x-goog-user-project): ADC user credentials must name a project
+        # with the Drive API enabled, or Drive returns 403. Required in practice for the
+        # ADC path; None omits the header (fine for credentials that carry their own).
+        self._quota_project = quota_project
+        self._chunk_size = chunk_size
+
+    async def _inject_token(self, transport: TransportAdapter, session: str) -> None:
+        token = await self._auth.token()
+        result = await transport.execute(
+            session, drive_runtime.build_token_inject_code(token, token_path=self._token_path)
+        )
+        if not result.ok or not drive_runtime.token_inject_ok(result.text):
+            raise FileTransferError("Failed to inject the Drive token onto the runtime.")
+
+    def _resolved_quota_project(self) -> str:
+        """The quota project to send: the explicit one, else the auth provider's (ADC)."""
+        if self._quota_project is not None:
+            return self._quota_project
+        return getattr(self._auth, "quota_project_id", None) or ""
+
+    def _upload_kwargs(self) -> dict[str, Any]:
+        kw: dict[str, Any] = {
+            "folder": self._folder,
+            "token_path": self._token_path,
+            "api_base": self._api_base,
+            "upload_base": self._upload_base,
+            "quota_project": self._resolved_quota_project(),
+        }
+        if self._chunk_size is not None:
+            kw["chunk_size"] = self._chunk_size
+        return kw
+
+    def _download_kwargs(self) -> dict[str, Any]:
+        kw = self._upload_kwargs()
+        kw.pop("upload_base")
+        return kw
+
+    @staticmethod
+    def _detail(payload: dict[str, Any]) -> str:
+        return f"{payload.get('error')} {payload.get('body', '')}".strip()
+
+    async def checkpoint_file(
+        self, transport: TransportAdapter, session: str, runtime_path: str, drive_name: str
+    ) -> dict[str, Any]:
+        """Upload ``runtime_path`` (on the VM) to Drive as ``drive_name``; return the result."""
+        await self._inject_token(transport, session)
+        code = drive_runtime.build_drive_upload_code(
+            runtime_path, drive_name, **self._upload_kwargs()
+        )
+        result = await transport.execute(session, code)
+        if not result.ok:
+            raise FileTransferError(
+                f"Drive checkpoint of {runtime_path} failed: {result.error or result.text[:200]}"
+            )
+        payload = drive_runtime.parse_drive_result(result.text)
+        if not payload.get("ok"):
+            raise FileTransferError(f"Drive checkpoint failed: {self._detail(payload)}")
+        return payload
+
+    async def restore_file(
+        self, transport: TransportAdapter, session: str, drive_name: str, runtime_path: str
+    ) -> dict[str, Any]:
+        """Download ``drive_name`` from Drive to ``runtime_path`` on the VM; return the result.
+
+        A missing Drive file is returned as ``{"ok": False, ...}`` (benign on a first run),
+        not raised — only transport/exec failures raise.
+        """
+        await self._inject_token(transport, session)
+        code = drive_runtime.build_drive_download_code(
+            drive_name, runtime_path, **self._download_kwargs()
+        )
+        result = await transport.execute(session, code)
+        if not result.ok:
+            raise FileTransferError(
+                f"Drive restore of {drive_name} failed: {result.error or result.text[:200]}"
+            )
+        return drive_runtime.parse_drive_result(result.text)
+
+    def hooks(self, paths: list[tuple[str, str]]) -> tuple[LifecycleHook, LifecycleHook]:
+        """Build (checkpoint, restore) lifecycle hooks for ``(runtime_path, drive_name)`` pairs.
+
+        Restore tolerates a not-yet-existing Drive file (first run) by skipping it.
+        """
+
+        async def checkpoint(transport: TransportAdapter, session: str) -> None:
+            for runtime_path, drive_name in paths:
+                await self.checkpoint_file(transport, session, runtime_path, drive_name)
+
+        async def restore(transport: TransportAdapter, session: str) -> None:
+            for runtime_path, drive_name in paths:
+                payload = await self.restore_file(transport, session, drive_name, runtime_path)
+                if not payload.get("ok"):
+                    _log.info("drive restore: %s not in Drive yet; skipping", drive_name)
+
+        return checkpoint, restore

@@ -42,6 +42,15 @@ class ADCAuthProvider(AuthProvider):
         # usually don't, so this is best-effort.
         return getattr(creds, "service_account_email", None) if creds else None
 
+    @property
+    def quota_project_id(self) -> str | None:
+        """The ADC quota project (``gcloud auth application-default set-quota-project``).
+
+        Known once credentials have been loaded (after the first ``token()``); ``None``
+        if no quota project is bound — in which case Drive API calls will 403.
+        """
+        return getattr(self._creds, "quota_project_id", None)
+
     def _sync_token(self) -> str:
         try:
             import google.auth

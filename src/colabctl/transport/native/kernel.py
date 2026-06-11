@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 from typing import Any, Protocol
 
-from colabctl.errors import FileTransferError
+from colabctl.errors import FileTransferError, KernelError
 from colabctl.models import (
     DisplayDataOutput,
     ErrorOutput,
@@ -23,12 +24,19 @@ from colabctl.models import (
     Output,
     StreamOutput,
 )
+from colabctl.observability import get_logger
 from colabctl.transport.base import OutputCallback
 from colabctl.transport.native.client import CLIENT_AGENT, ColabBackendClient
+
+_log = get_logger("transport.native.kernel")
 
 # Markers framing a base64 file payload printed by the download helper.
 _B64_BEGIN = "<<<COLABCTL_B64>>>"
 _B64_END = "<<<COLABCTL_END>>>"
+
+#: Default cap on cumulative interactive stream output retained in an ExecutionResult
+#: (detached jobs spool to the VM, so this only bounds in-memory interactive execs).
+DEFAULT_MAX_STREAM_CHARS = 5_000_000
 
 
 # --- pure output mapping (offline-tested) -----------------------------------
@@ -86,6 +94,36 @@ def outputs_to_result(reply: dict[str, Any]) -> ExecutionResult:
     )
 
 
+def cap_stream_output(result: ExecutionResult, max_chars: int) -> ExecutionResult:
+    """Bound the cumulative *stream* text in ``result`` to ``max_chars`` (head + tail kept).
+
+    Returns ``result`` unchanged when under the cap or when ``max_chars`` is non-positive.
+    Otherwise the stream outputs are merged into a single stdout stream holding the head
+    and tail with an honest ``…[N chars truncated]…`` marker between them — so a runaway
+    interactive exec can't balloon the client's memory (plan §5.9). Non-stream outputs
+    (results, errors) are preserved; live ``on_output`` streaming is unaffected.
+    """
+    if max_chars <= 0:
+        return result
+    stream_total = sum(len(o.text) for o in result.outputs if isinstance(o, StreamOutput))
+    if stream_total <= max_chars:
+        return result
+    combined = "".join(o.text for o in result.outputs if isinstance(o, StreamOutput))
+    half = max_chars // 2
+    dropped = len(combined) - 2 * half
+    capped = f"{combined[:half]}\n…[{dropped} chars truncated]…\n{combined[-half:]}"
+    new_outputs: list[Output] = []
+    merged = False
+    for output in result.outputs:
+        if isinstance(output, StreamOutput):
+            if not merged:
+                new_outputs.append(StreamOutput(name="stdout", text=capped))
+                merged = True
+        else:
+            new_outputs.append(output)
+    return result.model_copy(update={"outputs": new_outputs})
+
+
 # --- file-transfer code builders/parsers (offline-tested) -------------------
 
 
@@ -130,11 +168,14 @@ def parse_b64_payload(text: str) -> bytes:
 class KernelProtocol(Protocol):
     """What the native transport needs from a kernel (so it can be faked in tests)."""
 
+    @property
+    def kernel_id(self) -> str | None: ...
     async def start(self) -> None: ...
     async def execute(
         self, code: str, *, timeout: float | None = None, on_output: OutputCallback | None = None
     ) -> ExecutionResult: ...
     async def restart(self) -> None: ...
+    async def reconnect(self) -> None: ...
     async def stop(self) -> None: ...
 
 
@@ -144,13 +185,26 @@ class NativeKernel:
     ``jupyter-kernel-client`` is synchronous; calls run in a worker thread.
     """
 
-    def __init__(self, url: str, token: str, *, kernel_id: str | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        *,
+        kernel_id: str | None = None,
+        max_stream_chars: int = DEFAULT_MAX_STREAM_CHARS,
+    ) -> None:
         self._url = url
         self._token = token
         self._kernel_id = kernel_id
+        self._max_stream_chars = max_stream_chars
         # Typed Any (not Any | None) so the lazy jupyter-kernel-client object's
         # attributes don't trip mypy's union-attr check in the sync helpers.
         self._client: Any = None
+
+    @property
+    def kernel_id(self) -> str | None:
+        """The server-side kernel id (known once started) — used for interrupt/reconnect."""
+        return self._kernel_id
 
     async def start(self) -> None:
         if self._client is None:
@@ -166,11 +220,25 @@ class NativeKernel:
         if self._client is None:
             await self.start()
         reply = await asyncio.to_thread(self._execute_sync, code, timeout, on_output)
-        return outputs_to_result(reply)
+        return cap_stream_output(outputs_to_result(reply), self._max_stream_chars)
 
     async def restart(self) -> None:
         if self._client is not None:
             await asyncio.to_thread(self._client.restart)
+
+    async def reconnect(self) -> None:
+        """Re-dial the SAME server-side kernel after a dropped websocket (Phase A §③).
+
+        The kernel survives a websocket drop (``_own_kernel=False``), so we tear down
+        the dead client connection and rebuild against the retained ``kernel_id`` —
+        in-kernel state is preserved. Requires a known kernel id (start the kernel first).
+        Note: callers must only re-issue *idempotent* work after a reconnect; a
+        reconnect cannot know whether code sent before the drop already ran.
+        """
+        if self._kernel_id is None:
+            raise KernelError("cannot reconnect: no kernel id retained (start the kernel first).")
+        _log.warning("native kernel: reconnecting to kernel %s", self._kernel_id)
+        await asyncio.to_thread(self._reconnect_sync)
 
     async def stop(self) -> None:
         if self._client is not None:
@@ -234,6 +302,12 @@ class NativeKernel:
             "execution_count": content.get("execution_count"),
         }
 
+    def _reconnect_sync(self) -> None:
+        with contextlib.suppress(Exception):
+            if self._client is not None:
+                self._stop_sync()
+        self._client = self._build_and_start()  # reuses self._kernel_id
+
     def _stop_sync(self) -> None:
         client = self._client._manager.client
         client.stop_channels()
@@ -248,10 +322,12 @@ def default_kernel_factory(url: str, token: str) -> KernelProtocol:
 
 __all__ = [
     "CLIENT_AGENT",
+    "DEFAULT_MAX_STREAM_CHARS",
     "KernelProtocol",
     "NativeKernel",
     "build_download_code",
     "build_upload_code",
+    "cap_stream_output",
     "default_kernel_factory",
     "normalize_output",
     "outputs_to_result",

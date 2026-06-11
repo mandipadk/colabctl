@@ -50,6 +50,19 @@ class ExpiringTransport(CountingTransport):
         return self._remaining
 
 
+class RefreshableTransport(ExpiringTransport):
+    """Near-expiry, but can refresh the proxy token in place (§5.10)."""
+
+    def __init__(self, remaining, *, refresh_ok=True):
+        super().__init__(remaining)
+        self.refreshes = 0
+        self._refresh_ok = refresh_ok
+
+    async def refresh_token(self, name):
+        self.refreshes += 1
+        return self._refresh_ok
+
+
 async def test_allocates_on_start_stops_on_exit():
     t = FakeTransport()
     async with RuntimeLifecycleManager(t, RuntimeSpec(name="lj"), keepalive_interval=0) as mgr:
@@ -163,4 +176,33 @@ async def test_no_proactive_reassign_when_disabled():
     await mgr.start()
     await mgr._keepalive_tick()
     assert mgr.reassign_count == 0  # disabled → reactive-only
+    await mgr.stop()
+
+
+async def test_refresh_before_expiry_prefers_in_place_refresh():
+    t = RefreshableTransport(remaining=10.0)  # below the 120s margin
+    mgr = RuntimeLifecycleManager(
+        t, RuntimeSpec(name="lj"), keepalive_interval=0, refresh_before_expiry=True
+    )
+    await mgr.start()
+    await mgr._keepalive_tick()
+    assert t.refreshes == 1  # renewed the token in place
+    assert mgr.reassign_count == 0  # and did NOT disrupt the runtime
+    await mgr.stop()
+
+
+async def test_refresh_falls_back_to_reassign_when_unavailable():
+    # No refresh_token on the transport → refresh can't run; with reassign also enabled,
+    # the manager falls back to the disruptive path rather than ignoring expiry.
+    t = ExpiringTransport(remaining=10.0)
+    mgr = RuntimeLifecycleManager(
+        t,
+        RuntimeSpec(name="lj"),
+        keepalive_interval=0,
+        refresh_before_expiry=True,
+        reassign_before_expiry=True,
+    )
+    await mgr.start()
+    await mgr._keepalive_tick()
+    assert mgr.reassign_count == 1  # fell back to re-assign
     await mgr.stop()

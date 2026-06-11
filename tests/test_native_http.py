@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import uuid
+
 import httpx
 import pytest
 
-from colabctl.errors import AcceleratorUnavailableError, TooManyAssignmentsError
+from colabctl.errors import (
+    AcceleratorUnavailableError,
+    KernelError,
+    RuntimeUnavailableError,
+    TooManyAssignmentsError,
+)
 from colabctl.models import Accelerator
-from colabctl.transport.native.client import ColabBackendClient
+from colabctl.transport.native.client import PROXY_TOKEN_HEADER, ColabBackendClient
 
 _XSSI = ")]}'\n"
 
@@ -66,3 +73,66 @@ async def test_ccu_info_returns_parsed_dict():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = ColabBackendClient(http)
         assert await client.ccu_info() == {"computeUnits": 42.5}
+
+
+async def test_refresh_assignment_returns_existing_runtime_get_only():
+    methods: list[str] = []
+    body = (
+        '{"endpoint": "gpu-x", "accelerator": "T4", "variant": 1, '
+        '"runtimeProxyInfo": {"token": "ptok2", "tokenExpiresInSeconds": 600, '
+        '"url": "https://x/tun/m/gpu-x"}}'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        return httpx.Response(200, text=_XSSI + body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = ColabBackendClient(http)
+        assignment = await client.refresh_assignment(uuid.uuid4(), accelerator=Accelerator.T4)
+    assert assignment.endpoint == "gpu-x"
+    assert assignment.runtime_proxy_info is not None
+    assert assignment.runtime_proxy_info.token == "ptok2"
+    assert methods == ["GET"]  # GET-only: never POSTs, so it can't allocate a new runtime
+
+
+async def test_refresh_assignment_raises_when_reclaimed_without_posting():
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        # Only an XSRF token (the prelude to a NEW allocation) — runtime is gone.
+        return httpx.Response(200, text=_XSSI + '{"token": "xsrf"}')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = ColabBackendClient(http)
+        with pytest.raises(RuntimeUnavailableError):
+            await client.refresh_assignment(uuid.uuid4(), accelerator=Accelerator.T4)
+    assert methods == ["GET"]  # refused to allocate a replacement
+
+
+async def test_interrupt_kernel_uses_proxy_token_header_and_route():
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["method"] = request.method
+        seen["token"] = request.headers.get(PROXY_TOKEN_HEADER, "")
+        return httpx.Response(204)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = ColabBackendClient(http)
+        await client.interrupt_kernel("https://proxy.example/tun/m/ep", "kid", proxy_token="ptok")
+    assert seen["method"] == "POST"
+    assert seen["path"].endswith("/api/kernels/kid/interrupt")
+    assert seen["token"] == "ptok"  # header-only proxy auth, no bearer
+
+
+async def test_interrupt_kernel_non_2xx_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="kernel busy")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = ColabBackendClient(http)
+        with pytest.raises(KernelError):
+            await client.interrupt_kernel("https://proxy.example", "kid", proxy_token="ptok")
