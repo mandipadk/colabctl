@@ -150,6 +150,34 @@ class SessionInfo(BaseModel):
         return self.accelerator.label
 
 
+class CcuInfo(BaseModel):
+    """Compute-unit standing for a Colab account (``/tun/m/ccu-info``).
+
+    Shape verified live (canary, 2026-06-11); ``extra="ignore"`` so the model tolerates
+    the undocumented endpoint adding fields without breaking. All fields are optional.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    current_balance: float | None = Field(default=None, alias="currentBalance")
+    consumption_rate_hourly: float | None = Field(default=None, alias="consumptionRateHourly")
+    assignments_count: int | None = Field(default=None, alias="assignmentsCount")
+    eligible_gpus: list[str] = Field(default_factory=list, alias="eligibleGpus")
+    eligible_tpus: list[str] = Field(default_factory=list, alias="eligibleTpus")
+
+    @property
+    def runway_hours(self) -> float | None:
+        """Hours of balance left at the current burn rate (None if either is unknown/zero)."""
+        if self.current_balance is None or not self.consumption_rate_hourly:
+            return None
+        return self.current_balance / self.consumption_rate_hourly
+
+    @classmethod
+    def from_raw(cls, raw: object) -> CcuInfo | None:
+        """Parse the raw ``ccu_info`` passthrough into a typed view (None if not a dict)."""
+        return cls.model_validate(raw) if isinstance(raw, dict) else None
+
+
 # ---------------------------------------------------------------------------
 # Execution outputs (standard Jupyter output types, typed)
 # ---------------------------------------------------------------------------

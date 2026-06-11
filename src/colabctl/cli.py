@@ -24,8 +24,9 @@ from colabctl.auth.diagnostics import COLABORATORY_SCOPE, DRIVE_FILE_SCOPE, scop
 from colabctl.backends.base import Backend, JobSpec
 from colabctl.backends.factory import BACKEND_NAMES, build_backend
 from colabctl.errors import ColabctlError, TooManyAssignmentsError
-from colabctl.models import Accelerator, SessionInfo
-from colabctl.sdk.client import ColabClient, _resolve_accelerator
+from colabctl.models import Accelerator, CcuInfo, SessionInfo
+from colabctl.sdk.client import ColabClient, _resolve_accelerator, _resolve_ladder
+from colabctl.spend import spend_report
 from colabctl.transport.native import NativeColabTransport
 
 if TYPE_CHECKING:
@@ -183,7 +184,7 @@ def auth_status() -> None:
 
 @app.command()
 def quota(ctx: typer.Context) -> None:
-    """Show Colab compute-unit info (native transport)."""
+    """Show Colab compute-unit balance, burn rate, runway, and entitled accelerators."""
     state: _State = ctx.obj
 
     async def _go() -> None:
@@ -194,11 +195,49 @@ def quota(ctx: typer.Context) -> None:
                     "Compute-unit info is only available on the native transport (-t native)."
                 )
                 return
-            import json
+            ccu = CcuInfo.from_raw(info)
+            lines: list[str] = []
+            if ccu is not None:
+                if ccu.current_balance is not None:
+                    lines.append(f"balance:     {ccu.current_balance:.2f} compute units")
+                if ccu.consumption_rate_hourly is not None:
+                    lines.append(f"burn rate:   {ccu.consumption_rate_hourly:.2f} / hour")
+                if ccu.runway_hours is not None:
+                    lines.append(f"runway:      ~{ccu.runway_hours:.1f} hours")
+                if ccu.assignments_count is not None:
+                    lines.append(f"assignments: {ccu.assignments_count}")
+                if ccu.eligible_gpus:
+                    lines.append(f"GPUs:        {', '.join(ccu.eligible_gpus)}")
+                if ccu.eligible_tpus:
+                    lines.append(f"TPUs:        {', '.join(ccu.eligible_tpus)}")
+            if lines:
+                for line in lines:
+                    typer.echo(line)
+            else:  # unknown shape — fall back to raw passthrough
+                import json
 
-            typer.echo(json.dumps(info, indent=2, default=str))
+                typer.echo(json.dumps(info, indent=2, default=str))
 
     _run(_go())
+
+
+async def _spend_guard(client: ColabClient, gpu: str, yes: bool) -> None:
+    """Refuse a native allocation that would likely fail on spend, unless ``yes``.
+
+    No-op on non-native transports (no ``ccu-info``) or when the info is unavailable.
+    """
+    ccu = CcuInfo.from_raw(await client.quota())
+    if ccu is None:
+        return
+    ladder = _resolve_ladder(gpu, None, default=Accelerator.T4)
+    blockers, warnings = spend_report(ccu, ladder)
+    for warning in warnings:
+        typer.secho(f"warning: {warning}", fg=typer.colors.YELLOW, err=True)
+    if blockers and not yes:
+        for blocker in blockers:
+            typer.secho(f"blocked: {blocker}", fg=typer.colors.RED, err=True)
+        typer.secho("Re-run with --yes to allocate anyway.", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -210,12 +249,14 @@ def run(
     ),
     keep: bool = typer.Option(False, "--keep", help="Leave the runtime running afterwards"),
     timeout: float | None = typer.Option(None, "--timeout", help="Execution timeout (seconds)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the spend guard (allocate anyway)"),
 ) -> None:
     """Allocate a runtime, run a local file on it, then release it (unless --keep)."""
     state: _State = ctx.obj
 
     async def _go() -> None:
         async with _make_client(state) as client:
+            await _spend_guard(client, gpu, yes)
             session = await client.allocate(gpu=gpu, keep=keep)
             async with session:
                 result = await session.run_file(file, timeout=timeout)
@@ -252,12 +293,14 @@ def new(
     ctx: typer.Context,
     gpu: str = typer.Option("T4", "--gpu", help="Accelerator, or a ladder like 'A100,L4,T4'"),
     name: str | None = typer.Option(None, "--name", "-s", help="Session name"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the spend guard (allocate anyway)"),
 ) -> None:
     """Allocate a runtime and leave it running (attach later with `exec -s`)."""
     state: _State = ctx.obj
 
     async def _go() -> None:
         async with _make_client(state) as client:
+            await _spend_guard(client, gpu, yes)
             session = await client.allocate(gpu=gpu, name=name, keep=True)
             info = await session.status() or session.info
             if info is not None:

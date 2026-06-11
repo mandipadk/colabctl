@@ -89,15 +89,54 @@ def test_interrupt_command_delegates(monkeypatch) -> None:
     assert "Interrupted j" in result.output
 
 
-def test_quota_command_prints_ccu_info(monkeypatch) -> None:
+def test_quota_command_prints_friendly_fields(monkeypatch) -> None:
     class _Ccu(FakeTransport):
         async def ccu_info(self):
-            return {"computeUnits": 7}
+            return {"currentBalance": 42.0, "consumptionRateHourly": 2.0, "eligibleGpus": ["T4"]}
 
     monkeypatch.setattr(cli_mod, "_make_client", lambda state: ColabClient(transport=_Ccu()))
     result = runner.invoke(cli_mod.app, ["quota"])
     assert result.exit_code == 0
-    assert "computeUnits" in result.output
+    assert "balance:     42.00" in result.output
+    assert "runway:      ~21.0 hours" in result.output
+    assert "GPUs:        T4" in result.output
+
+
+def test_quota_command_unknown_shape_falls_back_to_raw(monkeypatch) -> None:
+    class _Ccu(FakeTransport):
+        async def ccu_info(self):
+            return {"somethingNew": 7}
+
+    monkeypatch.setattr(cli_mod, "_make_client", lambda state: ColabClient(transport=_Ccu()))
+    result = runner.invoke(cli_mod.app, ["quota"])
+    assert result.exit_code == 0
+    assert "somethingNew" in result.output  # raw passthrough
+
+
+class _ZeroBalance(FakeTransport):
+    async def ccu_info(self):
+        return {"currentBalance": 0.0}
+
+
+def test_spend_guard_blocks_zero_balance(monkeypatch, tmp_path) -> None:
+    script = tmp_path / "go.py"
+    script.write_text("print(1)")
+    monkeypatch.setattr(
+        cli_mod, "_make_client", lambda state: ColabClient(transport=_ZeroBalance())
+    )
+    result = runner.invoke(cli_mod.app, ["run", str(script), "--gpu", "A100"])
+    assert result.exit_code == 1
+    assert "blocked:" in result.output and "balance" in result.output
+
+
+def test_spend_guard_yes_overrides(monkeypatch, tmp_path) -> None:
+    script = tmp_path / "go.py"
+    script.write_text("print(1)")
+    t = _ZeroBalance()
+    monkeypatch.setattr(cli_mod, "_make_client", lambda state: ColabClient(transport=t))
+    result = runner.invoke(cli_mod.app, ["run", str(script), "--gpu", "A100", "--yes"])
+    assert result.exit_code == 0  # allocated + ran despite zero balance
+    assert t.executed  # the file actually ran
 
 
 def test_quota_command_non_native(monkeypatch) -> None:

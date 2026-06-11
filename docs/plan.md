@@ -417,9 +417,11 @@ sidecar tab closes / cookies rot; capabilities and caveats reflect the truth at 
 
 ## 5. Smaller high-leverage items
 
-> **Progress (2026-06-11):** ✅ §5.1 `colabctl quota` surfaces `ccu_info` (raw JSON; native
-> transport exposes `ccu_info()`, SDK `ColabClient.quota()`) — the *spend guard* part is deferred
-> until the undocumented `ccu_info` shape is understood (use `colabctl quota` to inspect it). ✅
+> **Progress (2026-06-11):** ✅ §5.1 `colabctl quota` (friendly balance/burn/runway/eligible
+> GPUs, raw fallback) **+ the spend guard** — the `ccu_info` shape (`currentBalance`,
+> `consumptionRateHourly`, `eligibleGpus/Tpus`) was captured live by the canary, so
+> `colabctl/spend.py` + a `--yes`-overridable guard on `run`/`new` now refuses a native
+> allocation when the balance is non-positive and warns on short runway / ineligible GPU. ✅
 > §5.2 allocation **ladder** (`--gpu A100,L4,T4`, `_resolve_ladder` + ladder-aware
 > `ColabClient.allocate` falling through `AcceleratorUnavailableError`). ✅ §5.8 **gc-on-412**:
 > `TooManyAssignmentsError` now prints a `gc --release-orphans` hint. ✅ §5.12 **canary**:

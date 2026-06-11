@@ -88,21 +88,32 @@ keep-alive effort but do not gate Pillars 1–3.
   i.e. compute-unit balance, hourly burn rate, and the entitled GPU/TPU list — enough to
   build a real pre-allocation spend guard (§5.1).
 
-## ⑤/⑧ Browser sidecar (Track A) → PARTIAL — frontend exists, handshake unresolved (2026-06-11)
+## ⑤/⑧ Browser sidecar (Track A) → PROTOCOL IDENTIFIED (2026-06-11)
 
-- Colab **does** have the MCP integration: opening the relay URL prompted *"Connect to a
-  local Colab MCP server"* and showed *"connecting…"* — but **no frame reached our relay**
-  (no `[conn]` line). So the WebSocket upgrade never completed to our handler (a rejected
-  handshake, a required subprotocol, a different port/path, or a page CSP/mixed-content
-  block on `ws://127.0.0.1`). Note: needed `?authuser=1` for the right account.
-- **Interpretation:** the colab-mcp `#mcpProxyToken/#mcpProxyPort` relay model we guessed
-  is not (or no longer) exactly what Colab's "local Colab MCP server" UI speaks; it likely
-  expects a real MCP server over a specific transport/handshake. Track A needs a deeper
-  capture before it's viable.
-- **Next:** `phase_a_sidecar.py` now enables websockets DEBUG logging and prints the
-  handshake `path`/`origin`/`subprotocols`, so a re-run will show exactly why the upgrade
-  fails (or whether the connection arrives at all). Until then, Track A is unblocked-pending
-  that capture; Track B (cookie/SAPISIDHASH, `phase_a_keepalive.py cookie`) is independent.
+The DEBUG-logged handshake nailed it. Colab's **"Connect to a local Colab MCP server"**
+connects to the local WebSocket **as an MCP client**:
+
+```
+< GET /?access_token=<mcpProxyToken> HTTP/1.1
+< Origin: https://colab.research.google.com
+< Sec-WebSocket-Protocol: mcp          ← REQUIRES the `mcp` subprotocol negotiated
+> 101 Switching Protocols              ← we accepted but did NOT echo `mcp` …
+< EOF                                   ← … so the client dropped instantly
+```
+
+- **Recipe:** WebSocket, subprotocol **`mcp`**, token via **`?access_token=` query param**
+  (not a hello message), Origin `colab.research.google.com`. A server that doesn't
+  *negotiate* `mcp` is disconnected immediately ("disconnected from local mcp server").
+- **Direction matters:** Colab is the **MCP client**; our process is the **MCP server**.
+  This is "let Colab use your local tools" — *not* a browser proxy that executes our
+  requests with the page's cookies. So it may **not** serve the Track-A keep-alive goal
+  (which needs the page to call `KeepAliveAssignment` on our behalf). The decisive evidence
+  is what the client declares in `initialize` / asks for — capture it next.
+- **`phase_a_sidecar.py` updated** to negotiate `mcp`, auth via the query token, and answer
+  `initialize`/`tools/list` with valid stubs so the session proceeds and the full handshake
+  is captured. **Next:** re-run, Connect, and paste the `<<<` MCP frames (esp. `initialize`).
+  If the page exposes nothing we can drive, Track A pivots to Track B (cookie/SAPISIDHASH,
+  `phase_a_keepalive.py cookie`) or a userscript/extension.
 
 ## ② Same-`nbh` token refresh → §5.10 ✅ PASS
 
