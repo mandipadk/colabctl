@@ -24,6 +24,18 @@ Per-backend auth:
 
 ### Colab ADC
 
+ADC is **one-time per machine** (the refresh token persists). colabctl wraps the setup:
+
+```bash
+colabctl auth login     # runs the gcloud ADC login with the exact scopes needed
+colabctl auth status    # account · scopes · Drive quota project · what to fix
+```
+
+`auth status` introspects the token (via Google's tokeninfo) and reports whether
+`colaboratory`/`drive.file` are granted and whether a Drive quota project is set — so a
+missing scope or quota project is caught up front, not as a runtime 401/403. The equivalent
+manual command (also printed by `colabctl auth scopes`):
+
 ```bash
 gcloud auth application-default login \
   --scopes=openid,https://www.googleapis.com/auth/cloud-platform,\
@@ -33,19 +45,31 @@ https://www.googleapis.com/auth/drive.file
 ```
 
 `cloud-platform` + `openid` are required by gcloud itself; `colaboratory` by the Colab
-backend; `drive.file` by Drive sync.
+backend; `drive.file` by Drive sync. **Runtime-direct Drive checkpoints** additionally need
+a quota project with the Drive API enabled (per-user ADC credentials are billed against a
+project, or Drive returns 403):
+
+```bash
+gcloud services enable drive.googleapis.com --project=YOUR_PROJECT
+gcloud auth application-default set-quota-project YOUR_PROJECT   # colabctl auto-detects it
+```
 
 ## Headless / long-running jobs
 
 - **Native transport** is opt-in: set `COLABCTL_ENABLE_NATIVE=1` (it's reverse-engineered
   and disabled by default per the ToS posture).
 - **Keep-alive limitation (important):** Colab's RuntimeService keep-alive RPC is
-  **unusable under token auth** (live-confirmed). There is no reliable way to hold a
-  Colab runtime open indefinitely headlessly. For long unattended work:
-  - keep the kernel genuinely busy (an active workload isn't idle-reclaimed), and
-  - **checkpoint to Drive + re-assign on reclamation** via `RuntimeLifecycleManager`
-    (`drive_checkpoint_hooks`), or
-  - route deadline-bound production jobs to **Vertex** or **Modal** instead.
+  **unusable under token auth** (live-confirmed), so there is no reliable *headless*
+  keep-alive. For long unattended work:
+  - submit a **detached job** (`colabctl -t native job run --detach --resumable`): it runs
+    as a supervised process on the VM and **auto-resumes** from your checkpoint if the
+    runtime is reclaimed — the durable path, robust to disconnects and client exit;
+  - **checkpoint to Drive + re-assign** via `RuntimeLifecycleManager` — runtime-direct
+    `DriveCheckpointer` (the VM uploads straight to Drive), or the client-side
+    `drive_checkpoint_hooks` fallback;
+  - for *interactive* work, use the **browser transport** (`-t browser`): it keeps its
+    runtime alive via genuine cell activity in your authenticated tab;
+  - or route deadline-bound production jobs to **Vertex** or **Modal** instead.
 
 ```python
 from colabctl import RuntimeLifecycleManager, DriveSync, drive_checkpoint_hooks
@@ -61,7 +85,9 @@ mgr = RuntimeLifecycleManager(transport, spec, checkpoint=checkpoint, restore=re
 { "mcpServers": { "colabctl": { "command": "colabctl-mcp" } } }
 ```
 
-The server exposes interactive Colab tools plus `run_job` / `list_backends` across all
+The server exposes interactive Colab tools (`allocate_runtime`, `run_code`,
+`interrupt_runtime`, …), the durable submit→poll job set (`submit_job`, `job_status`,
+`job_logs`, `job_result`, `cancel_job`), and `run_job` / `list_backends` across all
 backends. Run it under a process manager for always-on agent access.
 
 ## Abuse-detection risk (disclosed)

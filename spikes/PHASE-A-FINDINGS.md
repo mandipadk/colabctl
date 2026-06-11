@@ -3,8 +3,8 @@
 **Date:** 2026-06-09 · **Account:** _(redacted Colab Pro)_ · **Verdict: 🟢 GO — clean sweep**
 
 All five runtime-bundled probes PASSED on a single T4 allocation
-(`notebook_id=10d44625-61e4-47bf-9c71-a67e753b1bb5`,
-`endpoint=gpu-t4-s-kkb-use1c0-1w4x8zcoolemk`), torn down cleanly. Every spike-gated
+(`notebook_id=REDACTED-notebook-uuid`,
+`endpoint=gpu-t4-s-REDACTED`), torn down cleanly. Every spike-gated
 design fork in `docs/plan.md` resolved the favorable way: **no fallbacks needed**, and
 the durability thesis (connection ≠ data plane) is empirically validated. The
 keep-alive probes (⑥ cookie, ⑦ idle) and ⑧ sidecar capture remain to be run; they size
@@ -28,8 +28,8 @@ keep-alive effort but do not gate Pillars 1–3.
 
 ## ①b Chunked upload + ranged download round-trip → Pillar 3a ✅ PASS (2026-06-10)
 
-- `ContentsTransfer` round-tripped ~3.16 MB (`notebook_id=7ed3156d…`,
-  `endpoint=gpu-t4-s-kkb-ass1c1-2yzyo7n142l5i`) with a 1 MiB chunk size — forcing the
+- `ContentsTransfer` round-tripped ~3.16 MB (`notebook_id=REDACTED-nb…`,
+  `endpoint=gpu-t4-s-REDACTED`) with a 1 MiB chunk size — forcing the
   chunked-PUT upload path — and the download came back **byte-perfect** (SHA-256 match).
   Confirms the production transfer path live, not just single-PUT/GET.
 - Raw:
@@ -42,7 +42,7 @@ keep-alive effort but do not gate Pillars 1–3.
 
 ## ⑩ Runtime-direct Drive checkpoint → Pillar 3b ✅ PASS (2026-06-11)
 
-- **Live-validated:** 5 MiB uploaded resumably runtime→Drive (`id=183Wz_6SG…`), ranged-
+- **Live-validated:** 5 MiB uploaded resumably runtime→Drive (`id=REDACTED-drive-id…`), ranged-
   downloaded back, **SHA-256 matched on the VM** (`VERDICT PASS 5a818d905f73 …`). The
   whole Pillar 3b path works end-to-end against real Google Drive.
 - Confirmed the **quota-project auto-wire**: the spike ran with `COLABCTL_QUOTA_PROJECT`
@@ -141,18 +141,18 @@ connects to the local WebSocket **as an MCP client**:
   *attach* uses to reconnect cold.
 - Raw:
   ```json
-  {"verdict":"PASS","same_runtime":true,"fresh_token":true,"endpoint_1":"gpu-t4-s-kkb-use1c0-1w4x8zcoolemk","endpoint_2":"gpu-t4-s-kkb-use1c0-1w4x8zcoolemk"}
+  {"verdict":"PASS","same_runtime":true,"fresh_token":true,"endpoint_1":"gpu-t4-s-REDACTED","endpoint_2":"gpu-t4-s-REDACTED"}
   ```
 
 ## ③ Websocket reconnect to surviving kernel → §5.6 ✅ PASS
 
 - Dropped the kernel websocket, re-dialed the SAME `kernel_id`
-  (`6ee22417-0106-455e-9129-77ca17ecc8ed`); `print(x)` after reconnect returned `42` —
+  (`REDACTED-kernel-uuid`); `print(x)` after reconnect returned `42` —
   **state survived the disconnect.** Validates §5.6 and the whole "connection is not the
   data plane" thesis underpinning Pillar 2.
 - Raw:
   ```json
-  {"verdict":"PASS","kernel_id":"6ee22417-0106-455e-9129-77ca17ecc8ed","post_reconnect_stdout":"42\n"}
+  {"verdict":"PASS","kernel_id":"REDACTED-kernel-uuid","post_reconnect_stdout":"42\n"}
   ```
 
 ## ④ /api/kernels + interrupt route → §5.3 ✅ PASS
@@ -162,16 +162,16 @@ connects to the local WebSocket **as an MCP client**:
   are REST-feasible through the proxy.
 - Raw:
   ```json
-  {"verdict":"PASS","list_status":200,"kernels_seen":["6ee22417-0106-455e-9129-77ca17ecc8ed"],"interrupt_status":204}
+  {"verdict":"PASS","list_status":200,"kernels_seen":["REDACTED-kernel-uuid"],"interrupt_status":204}
   ```
 
 ## ⑤ A100 entitlement → carried Phase-0 TODO ✅ PASS
 
-- **Entitled: YES** — `client.assign(A100)` succeeded (`gpu-a100-s-kkb-usc1f1-k5nbzrukc3n5`),
+- **Entitled: YES** — `client.assign(A100)` succeeded (`gpu-a100-s-REDACTED`),
   released immediately. The allocation ladder (§5.2) can target A100 on this account.
 - Raw:
   ```json
-  {"verdict":"PASS","entitled":true,"endpoint":"gpu-a100-s-kkb-usc1f1-k5nbzrukc3n5"}
+  {"verdict":"PASS","entitled":true,"endpoint":"gpu-a100-s-REDACTED"}
   ```
 
 ## ⑥ SAPISIDHASH cookie keep-alive → Track B

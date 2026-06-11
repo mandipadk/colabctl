@@ -74,7 +74,7 @@ colab --auth oauth2 whoami
 
 ## Step 3 — Run the spike (captures everything to one file)
 
-From the repo root (`/Users/mandipadhikari/WorkInProgress/colabtoall`):
+From the repo root:
 
 ```bash
 bash spikes/run_phase0.sh                 # T4 only — cheapest, do this first

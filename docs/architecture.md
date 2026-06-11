@@ -15,9 +15,9 @@ the validation findings (including the keep-alive saga) are in
    TransportAdapter              Backend (provider abstraction)
    (interactive runtimes)        (batch jobs: submit/status/logs/result/cancel)
         │                               │
-   cli · native              colab · modal · vertex  ←  BackendRouter (capability + failover)
+   cli · native · browser    colab · modal · vertex  ←  BackendRouter (capability + failover)
         │
-   auth (ADC) · secrets · observability (logging, retry, spend guard)
+   state store · auth (ADC) · secrets · observability (logging, retry, spend guard, drift canary)
 ```
 
 ## Key decisions
@@ -30,8 +30,19 @@ the validation findings (including the keep-alive saga) are in
 - **Survivability via routing.** `BackendRouter` selects by capability and fails over
   on infrastructure errors (a Colab ban/outage degrades to Modal/Vertex), but never
   re-runs a job whose user code merely failed.
-- **Durability over keep-alive.** The Colab keep-alive RPC is unusable under token auth
-  (live-confirmed), so long jobs rely on kernel activity plus checkpoint-to-Drive +
-  automatic re-assign/restore.
-- **Honest disclosure + spend guards.** Backends report their ToS posture and caveats;
-  paid backends enforce a hard timeout ceiling.
+- **Durable across processes.** A local **state store** records sessions and jobs, so a
+  runtime created in one process is attachable from another, `stop` never silently leaks,
+  and `gc` reclaims orphans. **Detached jobs** run as supervised processes on the VM (the
+  kernel is a control plane, not the data plane), so a dropped connection costs a reconnect,
+  not the job — and a reclaimed runtime triggers auto-resume from a Drive checkpoint.
+- **Keep-alive, resolved per transport.** The token-auth keep-alive RPC is unusable
+  (live-confirmed). Headless native/detached jobs therefore rely on activity + checkpoint +
+  **auto-resume**; the **browser** transport (Colab's own ColabMCP tools, via a logged-in
+  tab) keeps *its* runtime alive with genuine cell activity in the authenticated session —
+  the one sanctioned keep-alive that works.
+- **Real-size data movement.** Files move over the Jupyter contents/files REST API (chunked
+  upload, ranged download); checkpoints go **runtime-direct to Drive** (the VM uploads, no
+  client in the path) so real ML state can actually be persisted.
+- **Honest disclosure + spend guards.** Backends report their ToS posture and caveats; paid
+  backends enforce a hard timeout ceiling; a pre-allocation spend guard refuses to burn a
+  zero compute-unit balance.

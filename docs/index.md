@@ -38,10 +38,19 @@ asyncio.run(main())
 ## Quickstart (CLI)
 
 ```bash
-colabctl run train.py --gpu T4                 # one-shot: allocate → run → release
+colabctl run train.py --gpu A100,L4,T4         # one-shot with a fallback ladder
+colabctl quota                                 # compute-unit balance + burn rate
 colabctl job run train.py --backend modal --gpu A100 --req torch
-colabctl job backends                          # list backends + capabilities
+
+# durable detached job — survives your client exiting / a disconnect / reclamation:
+id=$(colabctl -t native job run train.py --detach --resumable --gpu A100,L4,T4)
+colabctl -t native job logs -f "$id"           # follow; resumes exactly after a disconnect
+colabctl -t native job result "$id"
 ```
+
+`-t native` opts into the from-scratch transport; `-t browser` drives a Colab notebook
+through Colab's own MCP tools via a logged-in tab (sanctioned, and the one path that keeps
+its runtime alive).
 
 ## For AI agents (MCP)
 
@@ -49,19 +58,21 @@ colabctl job backends                          # list backends + capabilities
 { "mcpServers": { "colabctl": { "command": "colabctl-mcp" } } }
 ```
 
-Exposes interactive Colab tools plus `run_job` / `list_backends` across the Colab,
-Modal, and Vertex backends.
+Exposes interactive Colab tools (`allocate_runtime`, `run_code`, `interrupt_runtime`) plus
+the submit→poll job set (`submit_job`, `job_status`, `job_logs`, `job_result`, `cancel_job`)
+and `run_job` / `list_backends` across the Colab, Modal, and Vertex backends.
 
 ## Authentication
 
-The sanctioned Colab path uses Application Default Credentials:
+The Colab paths use Google Application Default Credentials — **one-time per machine**:
 
 ```bash
-gcloud auth application-default login \
-  --scopes=openid,https://www.googleapis.com/auth/cloud-platform,\
-https://www.googleapis.com/auth/userinfo.email,\
-https://www.googleapis.com/auth/colaboratory,\
-https://www.googleapis.com/auth/drive.file
+colabctl auth login     # runs the gcloud ADC login with the scopes colabctl needs
+colabctl auth status    # account · scopes · Drive quota project · what to fix
 ```
+
+For **runtime-direct Drive checkpoints**, ADC user credentials also need a quota project
+with the Drive API enabled (`gcloud auth application-default set-quota-project YOUR_PROJECT`;
+`auth status` flags it, and colabctl auto-detects it).
 
 See [Architecture](architecture.md) for how the pieces fit together.

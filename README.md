@@ -27,7 +27,8 @@ asyncio.run(main())
 > **Status:** alpha. The Colab paths (official-CLI transport + a from-scratch `/tun/m/*`
 > transport), durable sessions/jobs, the contents-API file transfer, runtime-direct Drive
 > checkpoints, and the Modal backend are **validated against real Colab Pro / accounts**.
-> Vertex / Hugging Face / the browser-bridge are implemented and unit-tested but **not yet
+> The **browser** transport runs Colab's own (live-captured) ColabMCP tools and is built +
+> unit-tested; Vertex / Hugging Face are implemented and unit-tested but **not yet
 > live-validated**. See [`docs/plan.md`](./docs/plan.md) and [`ROADMAP.md`](./ROADMAP.md)
 > for the honest, detailed status.
 
