@@ -9,6 +9,7 @@ inject a fake transport.
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 from collections.abc import Coroutine
@@ -516,6 +517,81 @@ job_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(job_app, name="job")
+
+nb_app = typer.Typer(
+    name="notebook",
+    help="Run parameterized notebooks on a remote GPU (papermill-style).",
+    no_args_is_help=True,
+)
+app.add_typer(nb_app, name="notebook")
+
+
+def _parse_params(items: list[str]) -> dict[str, Any]:
+    """Parse ``KEY=VALUE`` params; VALUE is JSON-decoded when possible (typed), else a string."""
+    params: dict[str, Any] = {}
+    for item in items:
+        if "=" not in item:
+            raise typer.BadParameter(f"--param must be KEY=VALUE, got {item!r}")
+        key, raw = item.split("=", 1)
+        try:
+            params[key] = json.loads(raw)
+        except json.JSONDecodeError:
+            params[key] = raw
+    return params
+
+
+@nb_app.command("run")
+def notebook_run(
+    ctx: typer.Context,
+    file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Local .ipynb to run"),
+    param: list[str] = typer.Option([], "--param", "-p", help="KEY=VALUE parameter (repeatable)"),
+    gpu: str = typer.Option("T4", "--gpu", help="Accelerator, or a ladder like 'A100,L4,T4'"),
+    detach: bool = typer.Option(False, "--detach", "-d", help="Submit as a durable detached job"),
+    out: Path | None = typer.Option(None, "--out", help="Write the executed .ipynb here"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the spend guard"),
+) -> None:
+    """Inject parameters and run a notebook on a remote GPU (cell-by-cell, or --detach)."""
+    from colabctl.notebook import executed_notebook, load_notebook, notebook_to_script, run_notebook
+
+    state: _State = ctx.obj
+    params = _parse_params(param)
+
+    if detach:
+        accel = _resolve_accelerator(gpu, None, default=Accelerator.T4)
+        script = notebook_to_script(load_notebook(file), params)
+
+        async def _go_detached() -> None:
+            backend_obj = _make_detached_backend(state)
+            try:
+                info = await backend_obj.submit(JobSpec(code=script, accelerator=accel))
+                typer.echo(info.id)
+                typer.echo(
+                    f"[{info.id}] submitted; follow with `colabctl job logs -f {info.id}`", err=True
+                )
+            finally:
+                await backend_obj.aclose()
+
+        _run(_go_detached())
+        return
+
+    async def _go() -> None:
+        async with _make_client(state) as client:
+            await _spend_guard(client, gpu, yes)
+            session = await client.allocate(gpu=gpu)
+            async with session:
+                results = await run_notebook(session, file, parameters=params)
+                for result in results:
+                    _emit(result.text, result.stderr)
+                if out is not None:
+                    nb = executed_notebook(load_notebook(file), results, parameters=params)
+                    out.write_text(json.dumps(nb, indent=1))
+                    typer.echo(f"wrote executed notebook: {out}", err=True)
+                failed = sum(1 for r in results if not r.ok)
+                typer.echo(f"ran {len(results)} cell(s), {failed} failed", err=True)
+                if failed:
+                    raise typer.Exit(1)
+
+    _run(_go())
 
 
 def _make_backend(name: str, state: _State) -> Backend:

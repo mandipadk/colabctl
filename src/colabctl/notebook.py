@@ -74,6 +74,56 @@ def notebook_to_script(nb: dict[str, Any], parameters: dict[str, Any] | None = N
     return "\n\n".join(code_cells(inject_parameters(nb, parameters or {})))
 
 
+def _code_cell_indices(nb: dict[str, Any]) -> list[int]:
+    """Indices of the non-empty code cells, in order — aligned with :func:`code_cells`."""
+    out: list[int] = []
+    for i, cell in enumerate(nb.get("cells", [])):
+        if cell.get("cell_type") != "code":
+            continue
+        src = cell.get("source") or ""
+        text = "".join(str(line) for line in src) if isinstance(src, list) else str(src)
+        if text.strip():
+            out.append(i)
+    return out
+
+
+def _result_to_outputs(result: ExecutionResult, count: int) -> list[dict[str, Any]]:
+    outs: list[dict[str, Any]] = []
+    if result.text:
+        outs.append({"output_type": "stream", "name": "stdout", "text": result.text})
+    if not result.ok and result.error:
+        outs.append(
+            {
+                "output_type": "error",
+                "ename": "Error",
+                "evalue": result.error,
+                "traceback": [result.error],
+            }
+        )
+    return outs
+
+
+def executed_notebook(
+    nb: dict[str, Any],
+    results: list[ExecutionResult],
+    *,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a copy of the (parameterized) notebook with each code cell's outputs filled
+    from the matching per-cell result — a papermill-style executed ``.ipynb`` artifact.
+
+    ``results`` must come from :func:`run_notebook` with the same ``parameters`` (so the
+    injected-parameters cell and cell order line up).
+    """
+    nb = inject_parameters(nb, parameters or {})
+    nb = copy.deepcopy(nb)
+    for count, (idx, result) in enumerate(zip(_code_cell_indices(nb), results, strict=False), 1):
+        cell = nb["cells"][idx]
+        cell["execution_count"] = count
+        cell["outputs"] = _result_to_outputs(result, count)
+    return nb
+
+
 async def run_notebook(
     session: ColabSession,
     path: str | Path,

@@ -182,6 +182,34 @@ class JobTools:
             "error": result.error,
         }
 
+    async def run_notebook(
+        self,
+        path: str,
+        backend: str = "colab",
+        gpu: str = "T4",
+        parameters: dict[str, Any] | None = None,
+        requirements: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run a parameterized ``.ipynb`` (by local path) as a job on a backend."""
+        from colabctl.notebook import run_notebook_job
+
+        result = await run_notebook_job(
+            self._backend(backend),
+            path,
+            parameters=parameters,
+            accelerator=_accelerator(gpu),
+            requirements=requirements or [],
+        )
+        return {
+            "backend": result.backend,
+            "state": result.state.value,
+            "ok": result.ok,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "error": result.error,
+        }
+
     async def list_backends(self) -> list[dict[str, Any]]:
         """List available backends and their capabilities."""
         out: list[dict[str, Any]] = []
@@ -301,6 +329,7 @@ def build_server(
     server.tool()(tools.stop_runtime)
     # Batch-job tools across backends.
     server.tool()(jobs.run_job)
+    server.tool()(jobs.run_notebook)
     server.tool()(jobs.list_backends)
     # Durable detached-job tools (submit → poll → collect).
     server.tool()(detached.submit_job)

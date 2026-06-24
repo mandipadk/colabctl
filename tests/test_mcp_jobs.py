@@ -28,6 +28,27 @@ async def test_run_job_cpu():
     assert fb.specs[0].accelerator.value == "NONE"
 
 
+async def test_run_notebook_runs_as_job(tmp_path):
+    import json
+
+    nb = tmp_path / "n.ipynb"
+    nb.write_text(
+        json.dumps(
+            {
+                "cells": [{"cell_type": "code", "metadata": {}, "source": "print(epochs)"}],
+                "metadata": {},
+                "nbformat": 4,
+            }
+        )
+    )
+    fb = FakeBackend(name="colab")
+    tools = JobTools(backend_factory=lambda name: fb)
+    out = await tools.run_notebook(str(nb), backend="colab", gpu="A100", parameters={"epochs": 5})
+    assert out["ok"] is True
+    assert fb.specs[0].accelerator.value == "A100"
+    assert "epochs = 5" in fb.specs[0].code  # the injected parameter
+
+
 async def test_list_backends():
     tools = JobTools(backend_factory=lambda name: FakeBackend(name=name, accels=["T4", "A100"]))
     out = await tools.list_backends()

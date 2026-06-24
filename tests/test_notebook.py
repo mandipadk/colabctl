@@ -101,3 +101,19 @@ async def test_run_notebook_job(tmp_path):
     assert result.state is JobState.SUCCEEDED
     assert backend.specs[0].accelerator is Accelerator.A100
     assert "train()" in backend.specs[0].code
+
+
+async def test_executed_notebook_fills_cell_outputs(tmp_path):
+    from colabctl.notebook import executed_notebook, load_notebook
+
+    nb_path = tmp_path / "n.ipynb"
+    nb_path.write_text(json.dumps(_nb("print(1)", "print(2)")))
+    session = ColabClient(transport=FakeTransport()).attach("j")
+    results = await run_notebook(session, nb_path, parameters={"x": 1})
+
+    out = executed_notebook(load_notebook(nb_path), results, parameters={"x": 1})
+    code = [c for c in out["cells"] if c["cell_type"] == "code"]
+    assert len(code) == 3  # injected params cell + 2 code cells
+    assert all(c.get("execution_count") for c in code)  # each got an execution count
+    assert code[-1]["outputs"][0]["output_type"] == "stream"
+    assert code[-1]["outputs"][0]["text"]  # the cell's captured stdout
