@@ -36,6 +36,8 @@ class FakeClient:
         self.assignment = _assignment()
         self.unassigned: list[str] = []
         self.keepalives: list[str] = []
+        self.tunnel_pings: list[str] = []
+        self.tunnel_fails = False
         self.last_accelerator: Accelerator | None = None
         self.fs: dict[str, bytes] = {}  # in-memory contents API ("path" -> bytes)
 
@@ -51,6 +53,13 @@ class FakeClient:
 
     async def keep_alive(self, endpoint: str, *, use_bearer: bool = False) -> None:
         self.keepalives.append(endpoint)
+
+    async def tunnel_keep_alive(self, endpoint: str, *, timeout: float = 10.0) -> None:
+        self.tunnel_pings.append(endpoint)
+        if self.tunnel_fails:
+            from colabctl.errors import KeepAliveError
+
+            raise KeepAliveError("simulated tunnel keep-alive failure")
 
     async def proxy_request(
         self,
@@ -172,15 +181,26 @@ async def test_stop_unassigns_and_stops_kernel():
     assert (await transport.status("job1")) is None
 
 
-async def test_keep_alive_pings_kernel():
-    # The RuntimeService RPC is unusable under token auth (live-confirmed), so
-    # keep_alive registers kernel activity instead of calling the RPC.
+async def test_keep_alive_prefers_tunnel_ping():
+    # keep_alive now uses the tunnel ping (token-auth, no kernel needed); the legacy
+    # RuntimeService RPC stays unused.
     transport, client, kernels = _transport()
     await transport.allocate(RuntimeSpec(name="job1"))
     await transport.keep_alive("job1")
+    assert client.tunnel_pings == [client.assignment.endpoint]
+    assert all("None" not in k.codes for k in kernels)  # no kernel ping when tunnel works
+    assert client.keepalives == []  # RPC keep-alive no longer used
+
+
+async def test_keep_alive_falls_back_to_kernel_when_tunnel_fails():
+    # When the tunnel ping is rejected, fall back to a time-bounded kernel-activity ping.
+    transport, client, kernels = _transport()
+    client.tunnel_fails = True
+    await transport.allocate(RuntimeSpec(name="job1"))
+    await transport.keep_alive("job1")
+    assert len(client.tunnel_pings) == 1
     assert kernels and kernels[0].started
     assert "None" in kernels[0].codes
-    assert client.keepalives == []  # RPC keep-alive no longer used
 
 
 async def test_seconds_until_proxy_expiry():

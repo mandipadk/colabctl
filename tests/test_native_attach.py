@@ -37,6 +37,8 @@ class FakeClient:
         self.interrupts: list[tuple[str, str, str]] = []
         self.assign_calls = 0
         self.refresh_calls = 0
+        self.tunnel_pings: list[str] = []
+        self.tunnel_fails = False
         self._tok = 0
 
     def _make(self, endpoint: str, accelerator: Accelerator) -> Assignment:
@@ -84,6 +86,13 @@ class FakeClient:
 
     async def interrupt_kernel(self, proxy_url: str, kernel_id: str, *, proxy_token: str) -> None:
         self.interrupts.append((proxy_url, kernel_id, proxy_token))
+
+    async def tunnel_keep_alive(self, endpoint: str, *, timeout: float = 10.0) -> None:
+        self.tunnel_pings.append(endpoint)
+        if self.tunnel_fails:
+            from colabctl.errors import KeepAliveError
+
+            raise KeepAliveError("simulated tunnel keep-alive failure")
 
 
 class FakeKernel:
@@ -306,11 +315,15 @@ async def test_is_live_true_false_and_unknown(state: StateStore) -> None:
 
 
 async def test_keep_alive_ping_is_time_bounded(state: StateStore) -> None:
+    # The kernel-activity ping is the FALLBACK now (the tunnel ping is preferred); force
+    # the fallback and assert it is a single, time-bounded "None" exec.
     client = FakeClient()
+    client.tunnel_fails = True
     t, kernels = _mk(client, state)
     await t.allocate(RuntimeSpec(name="job1"))
     await t.keep_alive("job1")
     assert kernels and kernels[0].codes == ["None"]
+    assert kernels[0].timeouts == [pytest.approx(30.0)]  # _KEEPALIVE_PING_TIMEOUT_S
     (timeout,) = kernels[0].timeouts
     assert timeout is not None and timeout <= 30  # bounded — can't wedge the loop (§5.5)
 

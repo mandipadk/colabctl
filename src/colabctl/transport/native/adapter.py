@@ -35,6 +35,7 @@ from colabctl.auth.base import AuthProvider
 from colabctl.errors import (
     ConfigurationError,
     FileTransferError,
+    KeepAliveError,
     KernelError,
     RuntimeUnavailableError,
     TransportError,
@@ -380,21 +381,37 @@ class NativeColabTransport(TransportAdapter):
         self._state.delete_session(name)
 
     async def keep_alive(self, name: str) -> None:
-        """Best-effort keep-alive: register kernel activity.
+        """Keep the runtime's lease alive.
 
-        The official RuntimeService keep-alive RPC is unusable under token auth
-        (401 api-key / 403 bearer — live-confirmed, PHASE0-FINDINGS §2; it needs
-        browser session cookies), so we instead execute a trivial statement to mark
-        the kernel active. This is best-effort, not a guaranteed lease extension —
-        long jobs should keep the kernel genuinely busy and checkpoint/re-assign on
-        reclamation.
+        Primary path: the **tunnel keep-alive ping** (the google-colab-cli recipe) — it
+        works at the tunnel level under ordinary token auth, needs no kernel, and does not
+        queue behind a running cell. Falls back to a best-effort kernel-activity ping when
+        the endpoint isn't known locally or the tunnel ping is rejected. The legacy
+        RuntimeService RPC stays unusable under token auth (PHASE0-FINDINGS §2).
 
-        The ping is time-bounded: kernel executes queue behind a running cell, and a
-        busy kernel is already registering activity, so blocking the keep-alive loop
-        on it would be pure harm (plan §5.5).
+        NOTE: ``Capabilities.keepalive`` stays ``False`` until a live run confirms the
+        tunnel ping actually holds a runtime past the idle window — see
+        ``spikes/phase_b_keepalive.py``. The ping is time-bounded so the keep-alive loop
+        never blocks behind a busy kernel (plan §5.5).
         """
+        endpoint = self._endpoint_for(name)
+        if endpoint is not None:
+            try:
+                await self._client.tunnel_keep_alive(endpoint)
+                return
+            except (KeepAliveError, httpx.HTTPError) as exc:
+                _log.debug(
+                    "native keep_alive: tunnel ping for %s failed (%s); "
+                    "falling back to kernel activity",
+                    name,
+                    exc,
+                )
         kernel = await self._kernel(name)
         await kernel.execute("None", timeout=_KEEPALIVE_PING_TIMEOUT_S)
+
+    def _endpoint_for(self, name: str) -> str | None:
+        record = self._state.get_session(name)
+        return record.endpoint if record is not None else None
 
     async def is_live(self, name: str) -> bool | None:
         """Whether this session's runtime is still assigned server-side.
