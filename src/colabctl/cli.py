@@ -795,6 +795,12 @@ def job_run(
     max_price: float | None = typer.Option(
         None, "--max-price", help="Refuse any backend pricier than this $/hr (fail-closed cap)"
     ),
+    budget: float | None = typer.Option(
+        None,
+        "--budget",
+        help="Refuse to launch if cumulative ledger spend + this run would exceed $N "
+        "(fail-closed cumulative cap)",
+    ),
 ) -> None:
     """Run a job on a backend, wait for it, and print the result.
 
@@ -843,13 +849,32 @@ def job_run(
         return
 
     # The cost-routing path (cheapest-first / fail-closed cap) needs the router too.
-    use_router = bool(allow) or cheapest or max_price is not None
+    use_router = bool(allow) or cheapest or max_price is not None or budget is not None
 
     async def _go() -> None:
         if use_router:
             names = [n.strip() for n in allow.split(",") if n.strip()] if allow else [backend]
             router = _make_router(names, state)
             try:
+                # Fail-closed cumulative budget gate BEFORE launch: project the cheapest
+                # eligible candidate's rate (1h) on top of the persisted ledger spend, and
+                # refuse if it would breach --budget. Reads the durable ledger so a restart
+                # can't reset cumulative spend and slip past the cap.
+                if budget is not None:
+                    from colabctl.allocation import AllocationGate
+                    from colabctl.state import StateStore
+
+                    ranked = await router.cost_ranked(
+                        spec, prefer=backend, spot=spot, max_price_usd_hr=max_price
+                    )
+                    cheapest_row = ranked[0][1] if ranked and ranked[0][1] is not None else None
+                    rate = cheapest_row.rate(spot=spot) if cheapest_row is not None else 0.0
+                    AllocationGate(budget_usd=budget).authorize(
+                        rate_usd_hr=rate,
+                        spent_usd=StateStore().total_spend_usd(),
+                        max_price_usd_hr=max_price,
+                        what="job run",
+                    )
                 # --backend is the preferred first candidate; fail over to the rest on
                 # infra errors (a ran-but-failed user job is never retried elsewhere).
                 # With --cheapest/--max-price the candidate order becomes cost order and

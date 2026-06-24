@@ -82,3 +82,47 @@ def test_job_run_records_spend_to_ledger(tmp_path: Path, monkeypatch) -> None:
     spend = runner.invoke(cli_mod.app, ["spend"])
     assert "1 allocation(s)" in spend.output
     assert "modal" in spend.output and "A100" in spend.output
+
+
+def test_job_run_budget_refuses_fail_closed(tmp_path: Path, monkeypatch) -> None:
+    from colabctl.backends.router import BackendRouter
+    from colabctl.state import SpendRecord, StateStore
+    from conftest import FakeBackend
+
+    home = tmp_path / "h"
+    monkeypatch.setenv("COLABCTL_HOME", str(home))
+    StateStore(home=home).record_spend(SpendRecord(backend="modal", est_cost_usd=9.50))  # near cap
+
+    ran = {"count": 0}
+
+    class _CountingBackend(FakeBackend):
+        async def run(self, spec):  # type: ignore[override]
+            ran["count"] += 1
+            return await super().run(spec)
+
+    monkeypatch.setattr(
+        cli_mod,
+        "_make_router",
+        lambda names, state: BackendRouter([_CountingBackend("modal", accels=["A100"])]),
+    )
+    # modal A100 is $2.50/hr; 9.50 spent + 2.50 = 12.0 > $10 budget → refuse, never launch
+    result = runner.invoke(
+        cli_mod.app,
+        [
+            "job",
+            "run",
+            "-c",
+            "print(1)",
+            "--backend",
+            "modal",
+            "--allow",
+            "modal",
+            "--gpu",
+            "A100",
+            "--budget",
+            "10",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "budget" in result.output.lower()
+    assert ran["count"] == 0  # fail-closed: nothing was launched
