@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import subprocess
 import sys
 from collections.abc import Coroutine
@@ -138,6 +139,59 @@ def _finish_run(result: ExecutionResult, printer: _StreamPrinter) -> None:
 def version() -> None:
     """Print the colabctl version."""
     typer.echo(f"colabctl {__version__}")
+
+
+def _latest_pypi_version() -> str | None:
+    """The latest colabctl version on PyPI (None if unreachable). Patched in tests."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen("https://pypi.org/pypi/colabctl/json", timeout=10) as resp:
+            return str(json.load(resp)["info"]["version"])
+    except Exception:
+        return None
+
+
+def _upgrade_command(method: str) -> list[str]:
+    """The upgrade command for the detected (or chosen) installer: pip or uv-tool."""
+    sp, exe = sys.prefix.replace("\\", "/"), sys.executable.replace("\\", "/")
+    use_uv = method == "uv" or (
+        method == "auto"
+        and shutil.which("uv") is not None
+        and ("uv/tools" in sp or "uv/tools" in exe)  # a uv-tool-managed venv
+    )
+    if use_uv:
+        return ["uv", "tool", "upgrade", "colabctl"]
+    return [sys.executable, "-m", "pip", "install", "--upgrade", "colabctl"]
+
+
+@app.command()
+def update(
+    check: bool = typer.Option(
+        False, "--check", help="Only report whether a newer version exists; don't upgrade"
+    ),
+    method: str = typer.Option(
+        "auto", "--method", help="Upgrade via: auto (detect) | pip | uv (uv tool)"
+    ),
+) -> None:
+    """Upgrade colabctl to the latest version on PyPI."""
+    current = __version__
+    latest = _latest_pypi_version()
+    typer.echo(f"installed: {current}")
+    typer.echo(f"latest:    {latest or '(could not reach PyPI)'}")
+    if latest is not None and latest == current:
+        typer.echo("colabctl is up to date.")
+        return
+    if check:
+        if latest is not None:
+            typer.echo("a newer version is available; run `colabctl update` to upgrade.")
+        return
+    if latest is None:
+        typer.secho("could not determine the latest version (PyPI unreachable).", err=True)
+        raise typer.Exit(1)
+    cmd = _upgrade_command(method)
+    typer.echo("running: " + " ".join(cmd), err=True)
+    raise typer.Exit(subprocess.call(cmd))
 
 
 auth_app = typer.Typer(

@@ -106,6 +106,8 @@ colabctl quota                               # compute-unit balance + burn rate
 colabctl sessions                            # live runtimes (real status, recovered names)
 colabctl gc --release-orphans                # reclaim runtimes nothing is tracking
 colabctl job run train.py --backend modal --gpu A100 --req torch   # any backend
+colabctl notebook run nb.ipynb --param epochs=10 --gpu T4 --out out.ipynb   # papermill-style
+colabctl update                              # self-upgrade to the latest PyPI release
 ```
 
 ### Durable, long-running work
