@@ -149,19 +149,23 @@ def cost(
     allow: str | None = typer.Option(
         None, "--allow", help="Restrict to these backends (comma-separated)"
     ),
+    live: bool = typer.Option(
+        False, "--live", help="Pull fresh prices from the live market feed (ComputePrices)"
+    ),
 ) -> None:
     """Estimate GPU cost per backend, cheapest first — the dry-run price view.
 
-    Uses the cost engine's price catalog (the offline static table until the live feed lands),
-    so it never launches anything. Prices are estimates for ranking, not binding quotes.
+    Defaults to the offline static table (deterministic, the trusted routing floor); ``--live``
+    overlays the cached, plausibility-guarded market feed. Never launches anything; prices are
+    ranking estimates, not binding quotes.
     """
-    from colabctl.cost import PriceCatalog
+    from colabctl.cost import default_catalog
 
     accel = _resolve_accelerator(gpu, None, default=Accelerator.A100)
     backends = [n.strip() for n in allow.split(",") if n.strip()] if allow else None
 
     async def _go() -> None:
-        rows = await PriceCatalog().per_backend(accel, spot=spot, backends=backends)
+        rows = await default_catalog(live=live).per_backend(accel, spot=spot, backends=backends)
         tier = "spot" if spot else "on-demand"
         if not rows:
             typer.echo(f"No {tier} price data for {accel.value}.")

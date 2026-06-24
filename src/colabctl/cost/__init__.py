@@ -9,6 +9,8 @@ risk feed lands as a sibling source. All consumers (router, AllocationGate budge
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from colabctl.cost.price import (
     STATIC_GPU_PRICES,
     GpuPrice,
@@ -17,10 +19,28 @@ from colabctl.cost.price import (
     StaticPriceSource,
 )
 
+
+def default_catalog(*, live: bool = False, home: Path | None = None) -> PriceCatalog:
+    """The price catalog colabctl uses.
+
+    ``live`` prepends the ComputePrices market feed (cached, plausibility-guarded) for fresh
+    prices; the in-repo static table is always the trusted fallback. Routing and the budget cap
+    default to ``live=False`` (the static floor is deterministic and offline-safe, and immune to
+    aggregator unit-errors); ``colabctl cost --live`` opts into the live market view.
+    """
+    sources: list[PriceSource] = []
+    if live:
+        from colabctl.cost.feeds import ComputePricesSource
+
+        sources.append(ComputePricesSource(home=home))
+    return PriceCatalog(sources)
+
+
 __all__ = [
     "STATIC_GPU_PRICES",
     "GpuPrice",
     "PriceCatalog",
     "PriceSource",
     "StaticPriceSource",
+    "default_catalog",
 ]

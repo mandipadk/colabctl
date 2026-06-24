@@ -115,3 +115,19 @@ async def test_falls_back_to_last_good_on_fetch_error(tmp_path: Path) -> None:
     assert {(r.provider, r.accelerator) for r in second} == {
         (r.provider, r.accelerator) for r in first
     }
+
+
+async def test_default_catalog_static_is_offline_deterministic() -> None:
+    from colabctl.cost import default_catalog
+
+    cheapest = await default_catalog(live=False).cheapest(Accelerator.A100)
+    assert cheapest is not None
+    assert cheapest.provider == "colab" and cheapest.source == "static"
+
+
+def test_default_catalog_live_prepends_market_feed() -> None:
+    from colabctl.cost import default_catalog
+    from colabctl.cost.feeds import ComputePricesSource
+
+    cat = default_catalog(live=True)
+    assert any(isinstance(s, ComputePricesSource) for s in cat._sources)  # live feed in the chain
