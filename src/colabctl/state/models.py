@@ -155,17 +155,35 @@ class StoredJob(BaseModel):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class SpendRecord(BaseModel):
+    """One append-only entry in the cross-backend USD spend ledger (Phase 2 cost engine).
+
+    Records the *estimated* cost of an allocation/job so cumulative spend can be capped and
+    reported across heterogeneous backends (free Colab/Kaggle = ``0.0``). Estimates come from
+    the price model; a measured cost can refine ``est_cost_usd`` later.
+    """
+
+    at: datetime = Field(default_factory=utcnow)
+    backend: str
+    accelerator: Accelerator = Accelerator.NONE
+    est_cost_usd: float = 0.0
+    hours: float | None = None  # billable hours when known (else a per-allocation estimate)
+    note: str | None = None
+
+
 class StateDocument(BaseModel):
-    """The root of ``state.json``: a schema version plus the session/job indexes."""
+    """The root of ``state.json``: a schema version plus the session/job/spend indexes."""
 
     schema_version: int = SCHEMA_VERSION
     sessions: dict[str, StoredSession] = Field(default_factory=dict)
     jobs: dict[str, StoredJob] = Field(default_factory=dict)
+    spend: list[SpendRecord] = Field(default_factory=list)
 
 
 __all__ = [
     "SCHEMA_VERSION",
     "RecordState",
+    "SpendRecord",
     "StateDocument",
     "StoredJob",
     "StoredSession",

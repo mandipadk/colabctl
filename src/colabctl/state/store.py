@@ -34,6 +34,7 @@ from colabctl.fsutil import atomic_write as _atomic_write
 from colabctl.observability import get_logger
 from colabctl.state.models import (
     SCHEMA_VERSION,
+    SpendRecord,
     StateDocument,
     StoredJob,
     StoredSession,
@@ -132,6 +133,18 @@ class StateStore:
     def delete_job(self, job_id: str) -> bool:
         with self.transaction() as doc:
             return doc.jobs.pop(job_id, None) is not None
+
+    # -- spend ledger (cross-backend USD; Phase 2 cost engine) ---------------
+
+    def record_spend(self, record: SpendRecord) -> None:
+        with self.transaction() as doc:
+            doc.spend.append(record)
+
+    def list_spend(self) -> list[SpendRecord]:
+        return list(self.load().spend)
+
+    def total_spend_usd(self, *, since: datetime | None = None) -> float:
+        return sum(r.est_cost_usd for r in self.load().spend if since is None or r.at >= since)
 
     # -- internals ----------------------------------------------------------
 
