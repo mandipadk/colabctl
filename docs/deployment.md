@@ -58,9 +58,12 @@ gcloud auth application-default set-quota-project YOUR_PROJECT   # colabctl auto
 
 - **Native transport** is opt-in: set `COLABCTL_ENABLE_NATIVE=1` (it's reverse-engineered
   and disabled by default per the ToS posture).
-- **Keep-alive limitation (important):** Colab's RuntimeService keep-alive RPC is
-  **unusable under token auth** (live-confirmed), so there is no reliable *headless*
-  keep-alive. For long unattended work:
+- **Headless keep-alive (native):** the native transport keeps a runtime alive with the
+  **tunnel keep-alive ping** (`GET /tun/m/<endpoint>/keep-alive/?authuser=0` +
+  `X-Colab-Tunnel: Google`, the google-colab-cli recipe) — token-auth, no browser tab,
+  no kernel needed; live-validated to hold a runtime **100+ min past idle** with zero
+  activity. (The legacy RuntimeService RPC remains unusable under token auth.) Colab's
+  hard 12/24h cap still applies, so for long unattended work:
   - submit a **detached job** (`colabctl -t native job run --detach --resumable`): it runs
     as a supervised process on the VM and **auto-resumes** from your checkpoint if the
     runtime is reclaimed — the durable path, robust to disconnects and client exit;

@@ -204,17 +204,20 @@ class NativeColabTransport(TransportAdapter):
             streaming_output=True,  # incremental via kernel execute_interactive output_hook
             headless=True,
             selectable_accelerator=True,
-            keepalive=False,
+            keepalive=True,
             file_transfer=True,
             notebook_execution=False,
             caveats=[
                 "Reverse-engineered /tun/m/* transport — opt-in, disabled by default "
                 "per the sanctioned ToS posture.",
-                "The RuntimeService keep-alive RPC is UNUSABLE under token auth "
-                "(401 api-key / 403 bearer, live-confirmed — PHASE0-FINDINGS §2): it needs "
-                "browser session cookies. keep_alive() therefore does a best-effort kernel "
-                "activity ping; for long jobs, rely on the workload keeping the kernel busy "
-                "and checkpoint/re-assign on idle reclamation.",
+                "keep_alive() uses the tunnel keep-alive ping (the google-colab-cli recipe: "
+                "GET /tun/m/<endpoint>/keep-alive/?authuser=0 + X-Colab-Tunnel: Google) — "
+                "headless, token-auth, no kernel needed; live-validated to hold a runtime "
+                "100+ min past idle with zero activity. (Falls back to a kernel-activity "
+                "ping if the tunnel ping is unavailable.) Colab's hard 12/24h cap still "
+                "applies — durable long jobs rely on checkpoint + auto-resume regardless.",
+                "The legacy RuntimeService keep-alive RPC stays unusable under token auth "
+                "(401/403 — PHASE0-FINDINGS §2); the tunnel ping above is the working path.",
                 "File transfer uses the Jupyter contents/files REST API over the runtime "
                 "proxy (chunked upload, ranged download); no kernel message-size ceiling.",
             ],

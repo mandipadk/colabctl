@@ -43,17 +43,20 @@ are run by hand (plus a weekly drift/health **canary**, `spikes/canary.py`).
   auto-resume on reclamation; **real-size transfer** (contents API) + **runtime-direct Drive
   checkpoints**; non-disruptive proxy-token refresh; auth UX (`colabctl auth login/status`),
   `quota` + spend guard, allocation ladder, `gc`-on-412; a scheduled drift **canary**; and
-  the sanctioned **browser transport** on Colab's ColabMCP protocol — the one path with
-  working keep-alive. Full detail and per-phase status: [`docs/plan.md`](./docs/plan.md).
+  the sanctioned **browser transport** on Colab's ColabMCP protocol. Both the native
+  (tunnel-ping) and browser (cell-activity) transports now have a working keep-alive. Full
+  detail and per-phase status: [`docs/plan.md`](./docs/plan.md).
 - **Remaining:** Track B keep-alive (cookie/SAPISIDHASH — now optional; the browser transport
   covers keep-alive), a live ≥90-min idle measurement, Vertex/HF live validation,
   Kaggle/RunPod, and chunked client-side `DriveSync`.
 
 ## Known limitations
 
-- **Keep-alive:** no token-auth keep-alive RPC (live-confirmed) — so headless native/detached
-  jobs rely on kernel activity + checkpoint/re-assign + **auto-resume**, while the **browser**
-  transport keeps *its* runtime alive via genuine cell activity in the authenticated session.
+- **Keep-alive:** the native transport now has a working **headless token-auth keep-alive** —
+  the tunnel ping (`/tun/m/<endpoint>/keep-alive/?authuser=0` + `X-Colab-Tunnel: Google`),
+  live-validated to hold a runtime 100+ min past idle with zero activity. The legacy
+  RuntimeService RPC stays unusable under token auth. Colab's hard 12/24h cap still applies,
+  so durable long jobs rely on checkpoint/re-assign + **auto-resume** regardless.
 - **Drive checkpoints:** ADC user credentials need a quota project with the Drive API enabled
   (`colabctl auth status` flags it; auto-detected once `set-quota-project` is run).
 - **Browser transport** is non-headless (needs a logged-in tab) and cannot terminate the VM

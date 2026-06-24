@@ -35,11 +35,13 @@ the validation findings (including the keep-alive saga) are in
   and `gc` reclaims orphans. **Detached jobs** run as supervised processes on the VM (the
   kernel is a control plane, not the data plane), so a dropped connection costs a reconnect,
   not the job — and a reclaimed runtime triggers auto-resume from a Drive checkpoint.
-- **Keep-alive, resolved per transport.** The token-auth keep-alive RPC is unusable
-  (live-confirmed). Headless native/detached jobs therefore rely on activity + checkpoint +
-  **auto-resume**; the **browser** transport (Colab's own ColabMCP tools, via a logged-in
-  tab) keeps *its* runtime alive with genuine cell activity in the authenticated session —
-  the one sanctioned keep-alive that works.
+- **Keep-alive, resolved per transport.** The legacy RuntimeService RPC is unusable under
+  token auth, but the **native** transport keeps a runtime alive headlessly with the tunnel
+  keep-alive ping (`/tun/m/<endpoint>/keep-alive/?authuser=0` + `X-Colab-Tunnel: Google`,
+  the google-colab-cli recipe), live-validated to hold a runtime 100+ min past idle with no
+  activity; the **browser** transport keeps *its* runtime alive with genuine cell activity in
+  the logged-in tab. Colab's hard 12/24h cap still applies, so durable long jobs rely on
+  checkpoint + **auto-resume** regardless of keep-alive.
 - **Real-size data movement.** Files move over the Jupyter contents/files REST API (chunked
   upload, ranged download); checkpoints go **runtime-direct to Drive** (the VM uploads, no
   client in the path) so real ML state can actually be persisted.
