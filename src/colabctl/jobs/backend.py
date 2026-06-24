@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import uuid
 
+from colabctl.allocation import DEFAULT_MAX_ATTEMPTS, AllocationGate
 from colabctl.backends.base import (
     Backend,
     BackendCapabilities,
@@ -27,7 +28,7 @@ from colabctl.backends.base import (
     JobSpec,
     JobState,
 )
-from colabctl.errors import ColabctlError, JobError, RuntimeUnavailableError
+from colabctl.errors import AllocationError, ColabctlError, JobError, RuntimeUnavailableError
 from colabctl.jobs.codes import DEFAULT_JOBS_ROOT
 from colabctl.jobs.runtime import KernelJobRuntime, job_state_from
 from colabctl.models import RuntimeSpec
@@ -51,11 +52,15 @@ class DetachedColabBackend(Backend):
         state: StateStore | None = None,
         root: str = DEFAULT_JOBS_ROOT,
         poll_interval: float = 2.0,
+        max_incarnations: int = DEFAULT_MAX_ATTEMPTS,
+        gate: AllocationGate | None = None,
     ) -> None:
         self._transport = transport
         self._state = state if state is not None else StateStore()
         self._runtime = KernelJobRuntime(transport, root=root)
         self._poll_interval = poll_interval
+        self._max_incarnations = max_incarnations
+        self._gate = gate if gate is not None else AllocationGate()
 
     @classmethod
     def create(
@@ -125,6 +130,7 @@ class DetachedColabBackend(Backend):
                 code=spec.resolved_code(),
                 timeout=spec.timeout,
                 resumable=spec.resumable,
+                max_incarnations=self._max_incarnations,
                 remote_dir=launched.remote_dir,
                 pid=launched.pid,
             )
@@ -251,7 +257,25 @@ class DetachedColabBackend(Backend):
     async def _resume(self, job: StoredJob) -> None:
         if job.code is None:
             raise JobError(f"Job {job.id!r} has no stored code to relaunch.")
-        _log.warning("job %s: runtime reclaimed, re-assigning and relaunching", job.id)
+        # Bound the re-allocation: refuse (and mark the job failed) once the incarnation
+        # cap is hit, and back off between attempts — so a flapping runtime can't loop
+        # allocating paid GPUs forever. ``_resume`` only runs on RuntimeUnavailableError
+        # (a "runtime gone" signal), never on a user-code failure, so this never retries a
+        # deterministically-broken job.
+        try:
+            await self._gate.before_attempt(
+                job.incarnations + 1, job.max_incarnations, what=f"job {job.id!r}"
+            )
+        except AllocationError:
+            job.state = JobState.FAILED
+            self._state.put_job(job)
+            raise
+        _log.warning(
+            "job %s: runtime reclaimed, re-assigning (incarnation %d/%d)",
+            job.id,
+            job.incarnations + 1,
+            job.max_incarnations,
+        )
         session = await self._transport.allocate(RuntimeSpec(accelerator=job.accelerator))
         launched = await self._runtime.launch(
             session.name,

@@ -13,8 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from colabctl.allocation import AllocationGate
 from colabctl.backends.base import JobSpec, JobState
-from colabctl.errors import RuntimeUnavailableError
+from colabctl.errors import AllocationError, RuntimeUnavailableError
 from colabctl.jobs.backend import DetachedColabBackend
 from colabctl.models import ExecutionResult, StreamOutput
 from colabctl.state import StateStore
@@ -67,8 +68,39 @@ def store(tmp_path: Path) -> StateStore:
     return StateStore(home=tmp_path / "home")
 
 
-def _backend(t: ScriptedTransport, store: StateStore, tmp_path: Path) -> DetachedColabBackend:
-    return DetachedColabBackend(t, state=store, root=str(tmp_path / "jobs"), poll_interval=0.01)
+def _backend(
+    t: ScriptedTransport, store: StateStore, tmp_path: Path, *, max_incarnations: int = 3
+) -> DetachedColabBackend:
+    # A zero-backoff gate keeps the bound's logic while running the test instantly.
+    return DetachedColabBackend(
+        t,
+        state=store,
+        root=str(tmp_path / "jobs"),
+        poll_interval=0.01,
+        max_incarnations=max_incarnations,
+        gate=AllocationGate(backoff_base=0.0),
+    )
+
+
+class FlappingTransport(ScriptedTransport):
+    """Reclaims on every wait-cycle's *first* poll, then 'recovers' on the re-poll — the
+    pattern that makes naive auto-resume re-allocate a paid GPU every cycle, forever."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._poll_seq = 0
+
+    async def execute(self, name, code, *, timeout=None, on_output=None) -> ExecutionResult:
+        if "start_new_session" in code:
+            self.launch_calls += 1
+            return _frame("4242")
+        if "status.json" in code:
+            self.polls += 1
+            self._poll_seq += 1
+            if self._poll_seq % 2 == 1:  # first poll of each cycle: runtime gone
+                raise RuntimeUnavailableError("flap")
+            return _frame(json.dumps({"state": "running", "log_size": 0}))  # re-poll: 'recovered'
+        return _frame(json.dumps({"offset": 0, "b64": ""}))
 
 
 async def test_resumable_job_auto_resumes_on_reclaim(store: StateStore, tmp_path: Path) -> None:
@@ -98,3 +130,24 @@ async def test_non_resumable_job_surfaces_reclaim(store: StateStore, tmp_path: P
         await backend.status(info.id)
     assert t.allocate_calls == 1  # did NOT re-allocate
     assert t.launch_calls == 1
+
+
+async def test_flapping_runtime_is_bounded_not_a_cost_runaway(
+    store: StateStore, tmp_path: Path
+) -> None:
+    """A runtime reclaimed on every cycle must NOT re-allocate paid GPUs forever — the
+    incarnation cap stops it and marks the job failed (the worst footgun, guarded)."""
+    t = FlappingTransport()
+    backend = _backend(t, store, tmp_path, max_incarnations=3)
+    info = await backend.submit(JobSpec(code="train()", resumable=True, name="j"))
+    assert t.allocate_calls == 1  # initial allocation only
+
+    with pytest.raises(AllocationError, match="exceeded the cap of 3"):
+        await backend.result(info.id)
+
+    # Bounded: initial + (max_incarnations - 1) resumes, then it refuses to re-allocate.
+    assert t.allocate_calls == 3
+    record = store.get_job(info.id)
+    assert record is not None
+    assert record.incarnations == 3
+    assert record.state is JobState.FAILED  # terminal, not stuck RUNNING

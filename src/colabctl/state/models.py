@@ -126,6 +126,9 @@ class StoredJob(BaseModel):
     exit_code: int | None = None
     #: How many runtimes this job has run on (incremented on each auto-resume).
     incarnations: int = 1
+    #: Hard ceiling on incarnations — auto-resume refuses to re-allocate past this, so a
+    #: flapping runtime can't loop allocating paid GPUs forever (the worst footgun).
+    max_incarnations: int = 3
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

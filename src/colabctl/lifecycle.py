@@ -26,6 +26,7 @@ from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import TypeVar
 
+from colabctl.allocation import AllocationGate
 from colabctl.errors import (
     AllocationError,
     RuntimeUnavailableError,
@@ -71,6 +72,7 @@ class RuntimeLifecycleManager:
         reassign_before_expiry: bool = False,
         expiry_margin: float = 120.0,
         ping_gate: PingGate | None = None,
+        gate: AllocationGate | None = None,
     ) -> None:
         self._transport = transport
         self._spec = spec
@@ -79,6 +81,7 @@ class RuntimeLifecycleManager:
         self._restore = restore
         self._on_reassign = on_reassign
         self._max_reassigns = max_reassigns
+        self._gate = gate if gate is not None else AllocationGate()
         self._ping_gate = ping_gate
         # Near proxy-token expiry, prefer a non-disruptive in-place refresh (transports
         # exposing `refresh_token`, Phase A §②) over a disruptive re-assign. Both default
@@ -211,6 +214,9 @@ class RuntimeLifecycleManager:
             raise RuntimeUnavailableError(
                 f"Exceeded max re-assigns ({self._max_reassigns}); last reason: {reason}"
             )
+        # Back off between re-assigns so a flapping runtime can't hammer the allocator
+        # even within the cap (the first re-assign waits 0s — no penalty for a one-off blip).
+        await self._gate.backoff(self._reassigns, what=f"session {self._spec.name or '?'!r}")
         # The old runtime is presumed gone; best-effort release, then allocate fresh.
         old = self._name
         self._name = None
