@@ -765,6 +765,48 @@ def job_list(ctx: typer.Context) -> None:
     _run(_go())
 
 
+@job_app.command(name="gc")
+def job_gc(
+    ctx: typer.Context,
+    ttl_hours: float = typer.Option(
+        168.0, "--ttl-hours", help="Prune terminal job records older than this (default 7d)"
+    ),
+    reconcile: bool = typer.Option(
+        True,
+        "--reconcile/--no-reconcile",
+        help="Mark non-resumable jobs whose runtime is gone as failed",
+    ),
+) -> None:
+    """Reconcile job records against live runtimes and prune stale terminal records."""
+    state: _State = ctx.obj
+
+    async def _go() -> None:
+        backend_obj = _make_detached_backend(state)
+        try:
+            report = await backend_obj.gc_jobs(ttl_hours=ttl_hours, reconcile=reconcile)
+            for jid in report.reconciled:
+                typer.echo(f"  reconciled {jid} -> FAILED (runtime gone)")
+            for jid in report.pruned:
+                typer.echo(f"  pruned terminal record {jid}")
+            typer.echo(f"gc: {len(report.reconciled)} reconciled, {len(report.pruned)} pruned")
+        finally:
+            await backend_obj.aclose()
+
+    _run(_go())
+
+
+@job_app.command(name="rm")
+def job_rm(ctx: typer.Context, job_id: str = typer.Argument(...)) -> None:
+    """Delete a single job record from the local store (does not touch the runtime)."""
+    from colabctl.state import StateStore
+
+    if StateStore().delete_job(job_id):
+        typer.echo(f"removed {job_id}")
+    else:
+        typer.secho(f"error: no such job: {job_id!r}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+
 @job_app.command(name="backends")
 def job_backends(ctx: typer.Context) -> None:
     """List available backends and their capabilities."""

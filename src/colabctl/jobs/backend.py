@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import uuid
+from dataclasses import dataclass, field
+from datetime import timedelta
 
 from colabctl.allocation import DEFAULT_MAX_ATTEMPTS, AllocationGate
 from colabctl.backends.base import (
@@ -33,10 +35,20 @@ from colabctl.jobs.codes import DEFAULT_JOBS_ROOT
 from colabctl.jobs.runtime import KernelJobRuntime, job_state_from
 from colabctl.models import RuntimeSpec
 from colabctl.observability import get_logger
-from colabctl.state import JobEvent, StateStore, StoredJob
+from colabctl.state import JobEvent, StateStore, StoredJob, utcnow
 from colabctl.transport.base import TransportAdapter
 
 _log = get_logger("jobs.backend")
+
+
+@dataclass
+class JobGcReport:
+    """What a ``gc_jobs`` pass did: which records it reconciled to LOST and which it pruned."""
+
+    reconciled: list[str] = field(default_factory=list)  # marked LOST (their runtime is gone)
+    pruned: list[str] = field(default_factory=list)  # terminal records deleted past the TTL
+
+
 _LOG_CHUNK = 65536
 
 
@@ -213,6 +225,50 @@ class DetachedColabBackend(Backend):
             for j in self._state.list_jobs()
             if j.backend == self.name
         ]
+
+    async def gc_jobs(self, *, ttl_hours: float = 168.0, reconcile: bool = True) -> JobGcReport:
+        """Reconcile job records against live sessions and prune stale terminal records.
+
+        Without this, records accumulate forever and a job whose runtime was reclaimed lies
+        ``RUNNING`` indefinitely. ``reconcile`` marks a **non-resumable** job whose session is
+        gone as ``FAILED`` (an honest terminal state, recorded as an event) — resumable jobs
+        are left alone since they recover on the next poll. Terminal records whose last
+        transition is older than ``ttl_hours`` are then deleted.
+        """
+        report = JobGcReport()
+        live_names: set[str] = set()
+        if reconcile:
+            with contextlib.suppress(ColabctlError):
+                live_names = {s.name for s in await self._transport.list_sessions()}
+        cutoff = utcnow() - timedelta(hours=ttl_hours)
+        for job in [j for j in self._state.list_jobs() if j.backend == self.name]:
+            if (
+                reconcile
+                and not job.state.is_terminal
+                and not job.resumable
+                and (job.session_name is None or job.session_name not in live_names)
+            ):
+                job.events.append(
+                    JobEvent(
+                        from_state=job.state,
+                        to_state=JobState.FAILED,
+                        incarnation=job.incarnations,
+                        reason="runtime gone (reconciled by gc)",
+                    )
+                )
+                job.state = JobState.FAILED
+                self._state.put_job(job)
+                report.reconciled.append(job.id)
+            elif job.state.is_terminal:
+                last = job.events[-1].at if job.events else job.created_at
+                if last < cutoff:
+                    self._state.delete_job(job.id)
+                    report.pruned.append(job.id)
+        return report
+
+    async def remove_job(self, job_id: str) -> bool:
+        """Delete a single job record (does not touch the runtime)."""
+        return self._state.delete_job(job_id)
 
     async def aclose(self) -> None:
         await self._transport.aclose()
