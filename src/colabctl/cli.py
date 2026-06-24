@@ -656,6 +656,26 @@ def job_status(ctx: typer.Context, job_id: str = typer.Argument(...)) -> None:
     _run(_go())
 
 
+@job_app.command(name="history")
+def job_history(ctx: typer.Context, job_id: str = typer.Argument(...)) -> None:
+    """Show a detached job's state-transition timeline (when/why each change, incarnation)."""
+    from colabctl.state import StateStore
+
+    record = StateStore().get_job(job_id)
+    if record is None:
+        typer.secho(f"error: no such job: {job_id!r}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    if not record.events:
+        typer.echo(f"[{record.id}] no recorded transitions (state: {record.state.value})")
+        return
+    for ev in record.events:
+        ts = ev.at.strftime("%Y-%m-%d %H:%M:%S")
+        reason = f"  — {ev.reason}" if ev.reason else ""
+        typer.echo(
+            f"{ts}  inc{ev.incarnation}  {ev.from_state.value} -> {ev.to_state.value}{reason}"
+        )
+
+
 @job_app.command(name="logs")
 def job_logs(
     ctx: typer.Context,

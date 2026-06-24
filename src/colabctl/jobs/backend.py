@@ -33,7 +33,7 @@ from colabctl.jobs.codes import DEFAULT_JOBS_ROOT
 from colabctl.jobs.runtime import KernelJobRuntime, job_state_from
 from colabctl.models import RuntimeSpec
 from colabctl.observability import get_logger
-from colabctl.state import StateStore, StoredJob
+from colabctl.state import JobEvent, StateStore, StoredJob
 from colabctl.transport.base import TransportAdapter
 
 _log = get_logger("jobs.backend")
@@ -133,6 +133,14 @@ class DetachedColabBackend(Backend):
                 max_incarnations=self._max_incarnations,
                 remote_dir=launched.remote_dir,
                 pid=launched.pid,
+                events=[
+                    JobEvent(
+                        from_state=JobState.PENDING,
+                        to_state=JobState.RUNNING,
+                        incarnation=1,
+                        reason="submitted",
+                    )
+                ],
             )
         )
         return JobInfo(
@@ -224,6 +232,10 @@ class DetachedColabBackend(Backend):
         return job.session_name
 
     def _persist_state(self, job: StoredJob, state: JobState, exit_code: object) -> None:
+        if state != job.state:
+            job.events.append(
+                JobEvent(from_state=job.state, to_state=state, incarnation=job.incarnations)
+            )
         job.state = state
         if isinstance(exit_code, int):
             job.exit_code = exit_code
@@ -267,6 +279,14 @@ class DetachedColabBackend(Backend):
                 job.incarnations + 1, job.max_incarnations, what=f"job {job.id!r}"
             )
         except AllocationError:
+            job.events.append(
+                JobEvent(
+                    from_state=job.state,
+                    to_state=JobState.FAILED,
+                    incarnation=job.incarnations,
+                    reason="exceeded max incarnations",
+                )
+            )
             job.state = JobState.FAILED
             self._state.put_job(job)
             raise
@@ -284,11 +304,20 @@ class DetachedColabBackend(Backend):
             requirements=job.requirements,
             timeout=job.timeout,
         )
+        prior_state = job.state
         job.session_name = session.name
         job.pid = launched.pid
         job.remote_dir = launched.remote_dir
         job.log_offset = 0  # the new runtime starts a fresh log
         job.incarnations += 1
+        job.events.append(
+            JobEvent(
+                from_state=prior_state,
+                to_state=JobState.RUNNING,
+                incarnation=job.incarnations,
+                reason="runtime reclaimed; re-assigned",
+            )
+        )
         job.state = JobState.RUNNING
         self._state.put_job(job)
 

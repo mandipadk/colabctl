@@ -118,6 +118,12 @@ async def test_resumable_job_auto_resumes_on_reclaim(store: StateStore, tmp_path
     record = store.get_job(info.id)
     assert record is not None and record.incarnations == 2
     assert record.log_offset == 0  # reset for the new runtime's log
+    # The event log captures the full lifecycle: submitted → re-assigned → succeeded.
+    assert record.events[0].reason == "submitted"
+    assert any(
+        e.reason == "runtime reclaimed; re-assigned" and e.incarnation == 2 for e in record.events
+    )
+    assert record.events[-1].to_state is JobState.SUCCEEDED
 
 
 async def test_non_resumable_job_surfaces_reclaim(store: StateStore, tmp_path: Path) -> None:
@@ -151,3 +157,7 @@ async def test_flapping_runtime_is_bounded_not_a_cost_runaway(
     assert record is not None
     assert record.incarnations == 3
     assert record.state is JobState.FAILED  # terminal, not stuck RUNNING
+    assert any(
+        e.to_state is JobState.FAILED and e.reason == "exceeded max incarnations"
+        for e in record.events
+    )

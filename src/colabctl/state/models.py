@@ -95,6 +95,21 @@ class StoredSession(BaseModel):
         return remaining is None or remaining <= margin
 
 
+class JobEvent(BaseModel):
+    """One entry in a job's append-only state-transition timeline.
+
+    Turns the opaque scalar ``(state, incarnations=7)`` into an auditable history: *when*
+    it changed, *from/to* which state, on which *incarnation*, and *why*. The bounded-resume
+    path and (later) the spend audit ledger both append here.
+    """
+
+    at: datetime = Field(default_factory=utcnow)
+    from_state: JobState
+    to_state: JobState
+    incarnation: int = 1
+    reason: str | None = None
+
+
 class StoredJob(BaseModel):
     """A detached job, persisted so its lifecycle outlives the launching process.
 
@@ -129,6 +144,8 @@ class StoredJob(BaseModel):
     #: Hard ceiling on incarnations — auto-resume refuses to re-allocate past this, so a
     #: flapping runtime can't loop allocating paid GPUs forever (the worst footgun).
     max_incarnations: int = 3
+    #: Append-only transition history (when/why each state change + on which incarnation).
+    events: list[JobEvent] = Field(default_factory=list)
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
