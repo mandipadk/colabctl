@@ -46,7 +46,7 @@ _TOKEN_SENTINEL = "COLABCTL_TOKEN_OK"
 #: pre-authorized by the session URI itself. On any HTTP error the call returns a result
 #: with the real status + body so the failure is diagnosable. No third-party import.
 DRIVE_HELPER_SOURCE = r"""
-import json, os, urllib.request, urllib.parse, urllib.error
+import hashlib, json, os, urllib.request, urllib.parse, urllib.error
 
 
 def _token(token_path):
@@ -99,47 +99,88 @@ def _http_error(exc):
     return {"ok": False, "error": "HTTP %d: %s" % (exc.code, exc.reason), "body": body}
 
 
+def _md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for blk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def _file_md5(api_base, token, qp, file_id):
+    req = urllib.request.Request(
+        api_base + "/drive/v3/files/" + file_id + "?fields=md5Checksum",
+        method="GET", headers=_headers(token, qp))
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read().decode()).get("md5Checksum")
+
+
+def _patch_meta(api_base, token, qp, file_id, body):
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(
+        api_base + "/drive/v3/files/" + file_id, data=data, method="PATCH",
+        headers=_headers(token, qp, {"Content-Type": "application/json"}))
+    with urllib.request.urlopen(req) as resp:
+        resp.read()
+
+
+def _raw_upload(local, name, folder_id, token, qp, upload_base, chunk):
+    size = os.path.getsize(local)
+    init = urllib.request.Request(
+        upload_base + "/upload/drive/v3/files?uploadType=resumable",
+        data=json.dumps({"name": name, "parents": [folder_id]}).encode(), method="POST",
+        headers=_headers(token, qp, {"Content-Type": "application/json; charset=UTF-8",
+                                     "X-Upload-Content-Length": str(size)}))
+    with urllib.request.urlopen(init) as resp:
+        location = resp.headers.get("Location")
+    if not location:
+        raise RuntimeError("Drive did not return a resumable session URI")
+    file_id, sent = None, 0
+    with open(local, "rb") as f:
+        while True:
+            data = f.read(chunk)
+            if not data and sent > 0:
+                break
+            end = sent + len(data) - 1
+            crange = "bytes */0" if size == 0 else "bytes %d-%d/%d" % (sent, end, size)
+            req = urllib.request.Request(
+                location, data=data, method="PUT", headers={"Content-Range": crange})
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    file_id = (json.loads(resp.read().decode() or "{}").get("id") or file_id)
+            except urllib.error.HTTPError as exc:
+                if exc.code != 308:  # 308 = resume incomplete → keep going
+                    raise
+            sent += len(data)
+            if size == 0:
+                break
+    return file_id
+
+
 def upload(local, name, folder, token_path, api_base, upload_base, qp, chunk):
+    # Crash-safe versioning: upload to a temp blob, verify its content end-to-end (Drive's
+    # md5 vs the local file's), and ONLY then trash the old checkpoint and promote the temp
+    # to the canonical name. So a crash mid-upload (the temp is incomplete) or a corrupt
+    # upload (md5 mismatch) can never destroy the last-good checkpoint.
     try:
         token = _token(token_path)
         folder_id = _ensure_folder(api_base, token, qp, folder)
-        existing = _find(api_base, token, qp, name, folder_id)
-        size = os.path.getsize(local)
-        if existing:
-            init_url = upload_base + "/upload/drive/v3/files/" + existing + "?uploadType=resumable"
-            meta, method = b"{}", "PATCH"
-        else:
-            init_url = upload_base + "/upload/drive/v3/files?uploadType=resumable"
-            meta = json.dumps({"name": name, "parents": [folder_id]}).encode()
-            method = "POST"
-        init = urllib.request.Request(
-            init_url, data=meta, method=method,
-            headers=_headers(token, qp, {"Content-Type": "application/json; charset=UTF-8",
-                                         "X-Upload-Content-Length": str(size)}))
-        with urllib.request.urlopen(init) as resp:
-            location = resp.headers.get("Location")
-        if not location:
-            return {"ok": False, "error": "Drive did not return a resumable session URI"}
-        file_id, sent = existing, 0
-        with open(local, "rb") as f:
-            while True:
-                data = f.read(chunk)
-                if not data and sent > 0:
-                    break
-                end = sent + len(data) - 1
-                crange = "bytes */0" if size == 0 else "bytes %d-%d/%d" % (sent, end, size)
-                req = urllib.request.Request(
-                    location, data=data, method="PUT", headers={"Content-Range": crange})
-                try:
-                    with urllib.request.urlopen(req) as resp:
-                        file_id = (json.loads(resp.read().decode() or "{}").get("id") or file_id)
-                except urllib.error.HTTPError as exc:
-                    if exc.code != 308:  # 308 = resume incomplete → keep going
-                        raise
-                sent += len(data)
-                if size == 0:
-                    break
-        return {"ok": True, "id": file_id, "bytes": size}
+        tmp = name + ".colabctl-new"
+        stale = _find(api_base, token, qp, tmp, folder_id)  # clean an interrupted prior run
+        if stale:
+            _patch_meta(api_base, token, qp, stale, {"trashed": True})
+        new_id = _raw_upload(local, tmp, folder_id, token, qp, upload_base, chunk)
+        local_md5 = _md5(local)
+        remote_md5 = _file_md5(api_base, token, qp, new_id)
+        if remote_md5 and remote_md5 != local_md5:
+            _patch_meta(api_base, token, qp, new_id, {"trashed": True})
+            return {"ok": False, "error": "checksum mismatch: local %s != drive %s" % (
+                local_md5, remote_md5)}
+        old_id = _find(api_base, token, qp, name, folder_id)
+        if old_id and old_id != new_id:  # trash the prior good version, then promote the temp
+            _patch_meta(api_base, token, qp, old_id, {"trashed": True})
+        _patch_meta(api_base, token, qp, new_id, {"name": name})
+        return {"ok": True, "id": new_id, "bytes": os.path.getsize(local), "md5": local_md5}
     except urllib.error.HTTPError as exc:
         return _http_error(exc)
 
@@ -149,6 +190,8 @@ def download(name, local, folder, token_path, api_base, qp, chunk):
         token = _token(token_path)
         folder_id = _ensure_folder(api_base, token, qp, folder)
         file_id = _find(api_base, token, qp, name, folder_id)
+        if not file_id:  # recover a promotion interrupted after trashing old, before rename
+            file_id = _find(api_base, token, qp, name + ".colabctl-new", folder_id)
         if not file_id:
             return {"ok": False, "error": "not found: " + name}
         url = api_base + "/drive/v3/files/" + file_id + "?alt=media"

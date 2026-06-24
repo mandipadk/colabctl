@@ -8,6 +8,7 @@ mock Drive server — no Google, but the real wire logic (init → Content-Range
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -70,6 +71,7 @@ class _MockDrive(ThreadingHTTPServer):
         self._counter = 0
         self.last_user_project: str | None = None
         self.forbid = False  # when True, list queries 403 (simulates the ADC quota gate)
+        self.bad_md5: str | None = None  # when set, md5Checksum responses return this wrong hash
 
     def next_id(self) -> int:
         self._counter += 1
@@ -99,9 +101,12 @@ class _Handler(BaseHTTPRequestHandler):
         if self.server.forbid and "/drive/v3/files" in u.path and "alt=media" not in u.query:
             self._json({"error": {"message": "Drive API not enabled for project"}}, code=403)
             return
-        if u.path.startswith("/drive/v3/files/"):  # alt=media download
+        if u.path.startswith("/drive/v3/files/"):  # files/<id>: md5 fields or alt=media download
             fid = u.path.rsplit("/", 1)[1]
             data = next((b for (i, b) in self.server.files.values() if i == fid), b"")
+            if "fields=md5Checksum" in u.query and "alt=media" not in u.query:
+                self._json({"md5Checksum": self.server.bad_md5 or hashlib.md5(data).hexdigest()})
+                return
             rng = self.headers.get("Range")
             if rng:
                 m = re.match(r"bytes=(\d+)-(\d+)", rng)
@@ -155,11 +160,22 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-    def do_PATCH(self) -> None:  # resumable init (update existing)
+    def do_PATCH(self) -> None:
         u = urlsplit(self.path)
+        body = self._body()
         fid = u.path.rsplit("/", 1)[1]
-        name = next((n for n, (i, _) in self.server.files.items() if i == fid), fid)
-        self._start_session(fid, name)
+        if u.path.startswith("/upload/"):  # legacy resumable init (update existing)
+            name = next((n for n, (i, _) in self.server.files.items() if i == fid), fid)
+            self._start_session(fid, name)
+            return
+        # metadata update: trash or rename a file by id (the crash-safe promotion path)
+        meta = json.loads(body or b"{}")
+        cur = next((n for n, (i, _) in self.server.files.items() if i == fid), None)
+        if cur is not None:
+            i, b = self.server.files.pop(cur)
+            if not meta.get("trashed"):  # rename: re-key under the new name (trash = drop it)
+                self.server.files[meta.get("name", cur)] = (i, b)
+        self._json({"id": fid})
 
     def do_PUT(self) -> None:
         sid = urlsplit(self.path).path.rsplit("/", 1)[1]
@@ -226,28 +242,60 @@ def test_resumable_upload_and_download_round_trip(drive_server, tmp_path: Path) 
     assert dest.read_bytes() == payload  # ranged download reassembled exactly
 
 
-def test_upload_updates_existing_file(drive_server, tmp_path: Path) -> None:
+def test_upload_versions_each_write_and_verifies(drive_server, tmp_path: Path) -> None:
     server, base = drive_server
     token = tmp_path / "tok"
     token.write_text("t")
     src = tmp_path / "f.bin"
 
     src.write_bytes(b"first version")
-    _run(
+    up1 = _run(
         build_drive_upload_code(
             str(src), "f.bin", token_path=str(token), api_base=base, upload_base=base
         )
     )
+    assert up1["ok"] and server.files["f.bin"][1] == b"first version"
     first_id = server.files["f.bin"][0]
 
     src.write_bytes(b"second version, longer")
+    up2 = _run(
+        build_drive_upload_code(
+            str(src), "f.bin", token_path=str(token), api_base=base, upload_base=base
+        )
+    )
+    assert up2["ok"]
+    assert server.files["f.bin"][1] == b"second version, longer"  # content replaced
+    assert server.files["f.bin"][0] != first_id  # a NEW verified blob, not an in-place overwrite
+    assert "f.bin.colabctl-new" not in server.files  # the temp was promoted; no leftover
+    assert up2["md5"] == hashlib.md5(b"second version, longer").hexdigest()  # end-to-end verified
+
+
+def test_corrupt_upload_rejected_and_last_good_preserved(drive_server, tmp_path: Path) -> None:
+    server, base = drive_server
+    token = tmp_path / "tok"
+    token.write_text("t")
+    src = tmp_path / "f.bin"
+
+    src.write_bytes(b"good checkpoint")
     _run(
         build_drive_upload_code(
             str(src), "f.bin", token_path=str(token), api_base=base, upload_base=base
         )
     )
-    assert server.files["f.bin"][0] == first_id  # upsert kept the same file id
-    assert server.files["f.bin"][1] == b"second version, longer"
+    good = server.files["f.bin"]
+
+    # Drive reports a wrong md5 for the next upload → the helper must reject it and NOT
+    # promote, leaving the prior good checkpoint completely intact (crash-safe versioning).
+    server.bad_md5 = "0" * 32
+    src.write_bytes(b"corrupted")
+    res = _run(
+        build_drive_upload_code(
+            str(src), "f.bin", token_path=str(token), api_base=base, upload_base=base
+        )
+    )
+    assert res["ok"] is False and "checksum mismatch" in res["error"]
+    assert server.files["f.bin"] == good  # last-good untouched
+    assert "f.bin.colabctl-new" not in server.files  # the bad temp was trashed
 
 
 def test_download_missing_file_reports_not_found(drive_server, tmp_path: Path) -> None:
