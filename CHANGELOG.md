@@ -6,6 +6,59 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-06-24
+
+Durability + credibility release. A native **headless keep-alive** that actually works, the
+failover/auto-resume/`@remote` claims made real and bulletproof, crash-safe checkpoints, and
+the notebook runner finally reachable. (Test suite 708 → 758.)
+
+### Added
+
+- **Headless token-auth keep-alive (native).** The native transport keeps a runtime alive
+  with the tunnel ping (`GET /tun/m/<endpoint>/keep-alive/?authuser=0` + `X-Colab-Tunnel:
+  Google`, the google-colab-cli recipe) — no browser tab, no kernel needed. Live-validated
+  to hold a runtime **100+ minutes past idle** with zero activity; `Capabilities.keepalive`
+  is now `True`. (Colab's hard 12/24h cap still applies, so durable long jobs rely on
+  checkpoint + auto-resume regardless.)
+- **Opt-in cross-backend failover** — `colabctl job run --backend colab --allow colab,modal,
+  vertex` (and MCP `run_job(allow=…)`) route through the capability router, so a Colab outage
+  degrades to the next backend. (Wires what was previously dead code.)
+- **`colabctl notebook run nb.ipynb --param k=v --gpu T4 [--detach] [--out executed.ipynb]`**
+  and an MCP `run_notebook` tool — papermill-style parameterized execution on a remote GPU,
+  emitting an executed `.ipynb` artifact. (The runner existed but was unreachable.)
+- **`@remote(requirements=[…], env={…})`** — declare pip deps + env on the runtime; cloudpickle
+  is pinned to the host version (fixes the by-value-pickle skew). Remote exceptions now
+  **re-raise as native Python objects** locally, with the remote traceback attached.
+- **Durable-job observability**: a state-transition event log + `colabctl job history`;
+  `colabctl job gc` (reconcile dead jobs to FAILED, prune terminal records past a TTL) and
+  `colabctl job rm`.
+- **`colabctl update`** — self-upgrade to the latest PyPI release (auto-detects uv-tool vs pip).
+- Friendly missing-extra errors on a bare install; the daily drift **canary** now alerts
+  (auto-files a GitHub issue) and asserts baseline integrity.
+
+### Fixed
+
+- **Bounded auto-resume.** A flapping runtime no longer re-allocates paid GPUs forever — a
+  hard incarnation cap + exponential backoff + a terminal `FAILED` state (the worst cost
+  footgun, closed).
+- **Crash-safe checkpoint versioning.** Runtime-direct Drive uploads are now two-phase +
+  end-to-end MD5-verified (temp blob → verify → promote), so a crash or a corrupt upload can
+  never destroy the last-good checkpoint (was overwrite-in-place with a size-only check).
+- **Process liveness.** A runner killed without writing an exit code (OOM/SIGKILL) now
+  resolves to `FAILED` instead of lying `RUNNING` forever.
+- **Atomic, locked secret writes.** `EncryptedFileSecretStore` was a bare `write_text` that
+  corrupted *all* secrets on a crash; it now writes via temp-file + `fsync` + `os.replace`
+  under a lock (extracted to a shared `colabctl.fsutil`).
+- **Log stitching.** Auto-resume no longer silently resets the log to zero — `logs`/`result`
+  show a continuous, attributable view with incarnation boundary markers.
+- **Streaming `run`/`exec`** so long interactive runs no longer look hung.
+- Ship `py.typed` (the `Typing :: Typed` classifier was unbacked); single-source `__version__`.
+
+### Changed
+
+- `Development Status` classifier `Pre-Alpha` → `Alpha`; README/ROADMAP/docs refreshed for
+  the working keep-alive and the durable fabric.
+
 ## [0.3.0] - 2026-06-11
 
 The **durability** release. colabctl gains a persistent fabric so sessions and jobs
