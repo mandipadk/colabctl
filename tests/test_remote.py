@@ -36,6 +36,21 @@ def test_build_remote_harness_embeds_payload_and_markers():
     assert "cloudpickle" in harness
     assert RESULT_BEGIN in harness
     assert "base64.b64encode" in harness
+    compile(harness, "harness", "exec")  # valid Python
+
+
+def test_build_remote_harness_declares_requirements_env_and_pins_cloudpickle():
+    harness = build_remote_harness(
+        "UEFZTE9BRA==",
+        requirements=["torch", "transformers"],
+        env={"HF_TOKEN": "secret"},
+        cloudpickle_version="3.1.0",
+    )
+    assert "cloudpickle==3.1.0" in harness  # pinned to the host version (skew fix)
+    assert "torch" in harness and "transformers" in harness  # pip-installed deps
+    assert "os.environ.update" in harness and "HF_TOKEN" in harness  # env injected
+    assert RESULT_BEGIN in harness  # result protocol unchanged
+    compile(harness, "harness", "exec")  # valid Python
 
 
 def test_parse_and_decode_result_roundtrip():

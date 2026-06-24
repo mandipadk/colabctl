@@ -60,23 +60,48 @@ def encode_call(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str,
         raise SerializationError(f"Could not serialize the remote call: {exc}") from exc
 
 
-def build_remote_harness(payload_b64: str) -> str:
-    """Build the VM-side code that unpickles, runs, and re-pickles the result."""
-    return (
-        "import base64\n"
-        "try:\n"
-        "    import cloudpickle as _cp\n"
-        "except Exception:\n"
-        "    import subprocess, sys\n"
-        "    subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'cloudpickle'],"
-        " check=True)\n"
-        "    import cloudpickle as _cp\n"
-        f"_payload = base64.b64decode({json.dumps(payload_b64)})\n"
-        "_fn, _args, _kwargs = _cp.loads(_payload)\n"
-        "_result = _fn(*_args, **_kwargs)\n"
-        "_enc = base64.b64encode(_cp.dumps(_result)).decode()\n"
-        f"print({json.dumps(RESULT_BEGIN)} + _enc + {json.dumps(RESULT_END)})\n"
-    )
+def build_remote_harness(
+    payload_b64: str,
+    *,
+    requirements: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    cloudpickle_version: str | None = None,
+) -> str:
+    """Build the VM-side code that unpickles, runs, and re-pickles the result.
+
+    Optionally injects ``env`` into ``os.environ``, pins ``cloudpickle`` to the host's
+    version (so the by-value pickle stays wire-compatible — Colab's base image ships a
+    different version, the classic ``@remote`` skew footgun), and ``pip install``s the
+    declared ``requirements`` before the call.
+    """
+    cp_spec = f"cloudpickle=={cloudpickle_version}" if cloudpickle_version else "cloudpickle"
+    lines = ["import base64, os, subprocess, sys"]
+    if env:
+        lines.append(f"os.environ.update({json.dumps(env)})")
+    lines += [
+        "try:",
+        "    import cloudpickle as _cp",
+        f"    _need = {json.dumps(cloudpickle_version)}",
+        "    if _need and _cp.__version__ != _need:",
+        "        raise ImportError('cloudpickle version skew')",
+        "except Exception:",
+        f"    subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', {json.dumps(cp_spec)}],"
+        " check=True)",
+        "    import cloudpickle as _cp",
+    ]
+    if requirements:
+        reqs = json.dumps(list(requirements))
+        lines.append(
+            f"subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', *{reqs}], check=True)"
+        )
+    lines += [
+        f"_payload = base64.b64decode({json.dumps(payload_b64)})",
+        "_fn, _args, _kwargs = _cp.loads(_payload)",
+        "_result = _fn(*_args, **_kwargs)",
+        "_enc = base64.b64encode(_cp.dumps(_result)).decode()",
+        f"print({json.dumps(RESULT_BEGIN)} + _enc + {json.dumps(RESULT_END)})",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def parse_result_payload(text: str) -> bytes:
@@ -111,13 +136,21 @@ async def _run_remote(
     keep: bool,
     client: ColabClient | None,
     timeout: float | None,
+    requirements: list[str] | None = None,
+    env: dict[str, str] | None = None,
 ) -> Any:
     own_client = client is None
     cl = client or ColabClient(transport_name=transport)
+    cp_version = getattr(_load_cloudpickle(), "__version__", None)
     try:
         session = await cl.allocate(gpu=gpu, keep=keep)
         async with session:
-            harness = build_remote_harness(encode_call(fn, args, kwargs))
+            harness = build_remote_harness(
+                encode_call(fn, args, kwargs),
+                requirements=requirements,
+                env=env,
+                cloudpickle_version=cp_version,
+            )
             result = await session.run(harness, timeout=timeout)
             if not result.ok:
                 err = result.error
@@ -142,11 +175,15 @@ def remote(
     keep: bool = False,
     client: ColabClient | None = None,
     timeout: float | None = None,
+    requirements: list[str] | None = None,
+    env: dict[str, str] | None = None,
 ) -> Any:
     """Decorator: run the wrapped function on a Colab GPU.
 
-    Usable as ``@remote`` or ``@remote(gpu="A100")``. The returned callable runs
-    synchronously by default; call ``.aio(...)`` for the awaitable form.
+    Usable as ``@remote`` or ``@remote(gpu="A100", requirements=["torch"], env={...})``.
+    ``requirements`` are pip-installed and ``env`` injected on the runtime before the call;
+    cloudpickle is pinned to the host's version to avoid the by-value-pickle skew. The
+    returned callable runs synchronously by default; call ``.aio(...)`` for the awaitable form.
     """
 
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
@@ -162,6 +199,8 @@ def remote(
                     keep=keep,
                     client=client,
                     timeout=timeout,
+                    requirements=requirements,
+                    env=env,
                 ),
             )
 
