@@ -41,7 +41,8 @@ async def test_tunnel_keep_alive_sends_the_recipe():
         client = ColabBackendClient(http, token_provider=_token)
         await client.tunnel_keep_alive("ep-abc")
 
-    assert seen["url"].endswith("/tun/m/ep-abc/keep-alive/")
+    assert "/tun/m/ep-abc/keep-alive/" in seen["url"]
+    assert "authuser=0" in seen["url"]  # required on the frontend host, else HTTP 400
     assert seen["tunnel"] == TUNNEL_HEADER_VALUE  # X-Colab-Tunnel: Google
     assert seen["auth"] == "Bearer tok-123"  # rides the ordinary bearer token
 

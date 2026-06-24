@@ -445,7 +445,9 @@ class ColabBackendClient:
     async def tunnel_keep_alive(self, endpoint: str, *, timeout: float = 10.0) -> None:
         """Send one tunnel keep-alive ping for ``endpoint`` — the google-colab-cli recipe.
 
-        ``GET {domain}/tun/m/<endpoint>/keep-alive/`` with header ``X-Colab-Tunnel: Google``.
+        ``GET {domain}/tun/m/<endpoint>/keep-alive/?authuser=0`` with header
+        ``X-Colab-Tunnel: Google``. The ``authuser`` query param is required on the Colab
+        frontend host (matching ``_send``); without it the tunnel front-end returns HTTP 400.
         Unlike the RuntimeService RPC (:meth:`keep_alive`, unusable under token auth), this
         works with the ordinary bearer token. The tunnel holds the request open, so the
         official client treats a ``ReadTimeout`` as **success** (the lease is refreshed
@@ -456,7 +458,9 @@ class ColabBackendClient:
         url = f"{self._domain}{TUN_ENDPOINT}/{endpoint}/keep-alive/"
         headers = {**await self._auth_headers(), TUNNEL_HEADER: TUNNEL_HEADER_VALUE}
         try:
-            resp = await self._http.get(url, headers=headers, timeout=timeout)
+            resp = await self._http.get(
+                url, params={"authuser": "0"}, headers=headers, timeout=timeout
+            )
         except httpx.ReadTimeout:
             return  # the tunnel held the connection open → lease refreshed → success
         if not resp.is_success:
