@@ -59,3 +59,26 @@ def test_spend_empty_ledger(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(cli_mod.app, ["spend"])
     assert result.exit_code == 0
     assert "$0.00" in result.output and "0 allocation(s)" in result.output
+
+
+def test_job_run_records_spend_to_ledger(tmp_path: Path, monkeypatch) -> None:
+    from colabctl.backends.router import BackendRouter
+    from conftest import FakeBackend
+
+    home = tmp_path / "h"
+    monkeypatch.setenv("COLABCTL_HOME", str(home))
+    monkeypatch.setattr(
+        cli_mod,
+        "_make_router",
+        lambda names, state: BackendRouter([FakeBackend("modal", accels=["A100"])]),
+    )
+    result = runner.invoke(
+        cli_mod.app,
+        ["job", "run", "-c", "print(1)", "--backend", "modal", "--allow", "modal", "--gpu", "A100"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "[modal] SUCCEEDED" in result.output
+    # the run appended an estimated SpendRecord for the backend that ran
+    spend = runner.invoke(cli_mod.app, ["spend"])
+    assert "1 allocation(s)" in spend.output
+    assert "modal" in spend.output and "A100" in spend.output

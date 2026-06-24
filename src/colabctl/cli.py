@@ -13,6 +13,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from pathlib import Path
@@ -724,6 +725,32 @@ def _print_job_result(result: JobResult) -> None:
         raise typer.Exit(1)
 
 
+async def _record_run_spend(
+    result: JobResult, accelerator: Accelerator, *, spot: bool, hours: float
+) -> None:
+    """Append an estimated ``SpendRecord`` for a completed router run (best-effort).
+
+    Closes the cost loop: ``job run`` → the ledger → ``colabctl spend`` and the cumulative
+    budget cap. Estimates ``rate * wall-clock-hours`` from the catalog price of the backend
+    that actually ran; never raises (ledger bookkeeping must not break a finished run).
+    """
+    try:
+        from colabctl.cost import PriceCatalog
+        from colabctl.state import SpendRecord, StateStore
+
+        price = await PriceCatalog().cheapest(accelerator, spot=spot, backends=[result.backend])
+        if price is None:
+            return
+        est = price.rate(spot=spot) * max(hours, 1.0 / 3600.0)
+        StateStore().record_spend(
+            SpendRecord(
+                backend=result.backend, accelerator=accelerator, est_cost_usd=est, hours=hours
+            )
+        )
+    except Exception:
+        pass
+
+
 def _make_detached_backend(state: _State) -> DetachedColabBackend:
     """Build the durable detached Colab backend (native-only; patched in tests)."""
     from colabctl.jobs.backend import DetachedColabBackend
@@ -827,6 +854,7 @@ def job_run(
                 # infra errors (a ran-but-failed user job is never retried elsewhere).
                 # With --cheapest/--max-price the candidate order becomes cost order and
                 # over-cap backends are refused fail-closed.
+                t0 = time.monotonic()
                 result = await router.run(
                     spec,
                     prefer=backend,
@@ -834,6 +862,9 @@ def job_run(
                     cheapest=cheapest,
                     spot=spot,
                     max_price_usd_hr=max_price,
+                )
+                await _record_run_spend(
+                    result, accelerator, spot=spot, hours=(time.monotonic() - t0) / 3600.0
                 )
                 _print_job_result(result)
             finally:
