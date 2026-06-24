@@ -60,8 +60,10 @@ all = [
 ]
 
 [project.scripts]
-colabctl = "colabctl.cli:main"
-colabctl-mcp = "colabctl.mcp_server:main"
+# Routed through _entry so a bare install (missing the cli/mcp extra) gets a friendly
+# "pip install colabctl[cli]" message + non-zero exit instead of a raw traceback.
+colabctl = "colabctl._entry:cli_main"
+colabctl-mcp = "colabctl._entry:mcp_main"
 
 [dependency-groups]
 dev = [
