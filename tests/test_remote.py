@@ -66,6 +66,38 @@ def test_parse_result_payload_missing_markers():
         parse_result_payload("no markers")
 
 
+def test_harness_catches_exceptions_and_status_tags_the_frame():
+    harness = build_remote_harness("UEFZTE9BRA==")
+    assert "except Exception" in harness  # the user fn is wrapped
+    assert "'ok'" in harness and "'err'" in harness  # status-tagged frame
+    assert "_tbmod.format_exc()" in harness  # the remote traceback is shipped back
+    compile(harness, "harness", "exec")
+
+
+def test_decode_result_reraises_native_remote_exception():
+    exc = ValueError("boom on the GPU")
+    blob = cloudpickle.dumps({"exc": exc, "tb": "Traceback...\nValueError: boom on the GPU"})
+    text = f"{RESULT_BEGIN}err|{base64.b64encode(blob).decode()}{RESULT_END}"
+    with pytest.raises(ValueError, match="boom on the GPU") as ei:
+        decode_result(text)
+    # the remote traceback is attached, not lost
+    assert any("Remote traceback" in n for n in getattr(ei.value, "__notes__", []))
+
+
+async def test_remote_decorator_reraises_remote_exception():
+    exc = RuntimeError("gpu oom")
+    blob = cloudpickle.dumps({"exc": exc, "tb": "...\nRuntimeError: gpu oom"})
+    text = f"{RESULT_BEGIN}err|{base64.b64encode(blob).decode()}{RESULT_END}"
+    client = ColabClient(transport=FakeTransport(execute_text=text))
+
+    @remote(client=client)
+    def f() -> int:
+        return 1
+
+    with pytest.raises(RuntimeError, match="gpu oom"):
+        await f.aio()
+
+
 async def test_remote_decorator_orchestration_returns_decoded_value():
     # Simulate the VM having produced a pickled result of 99.
     encoded = base64.b64encode(cloudpickle.dumps(99)).decode()
