@@ -141,6 +141,59 @@ def version() -> None:
     typer.echo(f"colabctl {__version__}")
 
 
+@app.command()
+def cost(
+    gpu: str = typer.Option("A100", "--gpu", help="Accelerator to price (T4/L4/A100/H100)"),
+    spot: bool = typer.Option(False, "--spot", help="Show interruptible/spot rates instead"),
+    allow: str | None = typer.Option(
+        None, "--allow", help="Restrict to these backends (comma-separated)"
+    ),
+) -> None:
+    """Estimate GPU cost per backend, cheapest first — the dry-run price view.
+
+    Uses the cost engine's price catalog (the offline static table until the live feed lands),
+    so it never launches anything. Prices are estimates for ranking, not binding quotes.
+    """
+    from colabctl.cost import PriceCatalog
+
+    accel = _resolve_accelerator(gpu, None, default=Accelerator.A100)
+    backends = [n.strip() for n in allow.split(",") if n.strip()] if allow else None
+
+    async def _go() -> None:
+        rows = await PriceCatalog().per_backend(accel, spot=spot, backends=backends)
+        tier = "spot" if spot else "on-demand"
+        if not rows:
+            typer.echo(f"No {tier} price data for {accel.value}.")
+            return
+        typer.echo(f"{accel.value} {tier} estimate ($/hr, cheapest first):")
+        for r in rows:
+            typer.echo(f"  {r.provider:<8} ${r.rate(spot=spot):>6.2f}/hr  [{r.source}]")
+
+    _run(_go())
+
+
+@app.command()
+def spend(
+    days: int | None = typer.Option(
+        None, "--days", help="Only count spend in the last N days (default: all time)"
+    ),
+) -> None:
+    """Show the cross-backend USD spend ledger (estimated)."""
+    from datetime import timedelta
+
+    from colabctl.state import StateStore, utcnow
+
+    store = StateStore()
+    since = (utcnow() - timedelta(days=days)) if days else None
+    total = store.total_spend_usd(since=since)
+    records = [r for r in store.list_spend() if since is None or r.at >= since]
+    window = f" (last {days}d)" if days else ""
+    typer.echo(f"estimated spend{window}: ${total:.2f} across {len(records)} allocation(s)")
+    for r in records[-10:]:
+        ts = r.at.strftime("%Y-%m-%d %H:%M")
+        typer.echo(f"  {ts}  {r.backend:<8} {r.accelerator.value:<5} ${r.est_cost_usd:>6.2f}")
+
+
 def _latest_pypi_version() -> str | None:
     """The latest colabctl version on PyPI (None if unreachable). Patched in tests."""
     import urllib.request
@@ -704,6 +757,17 @@ def job_run(
         "'colab,modal,vertex'. --backend is tried first; the job is RE-RUN on the next "
         "backend if one fails to allocate, so use this only for idempotent jobs.",
     ),
+    spot: bool = typer.Option(
+        False,
+        "--spot",
+        help="Prefer the cheaper interruptible/spot tier where a backend offers one",
+    ),
+    cheapest: bool = typer.Option(
+        False, "--cheapest", help="Route to the cheapest capable backend (use with --allow)"
+    ),
+    max_price: float | None = typer.Option(
+        None, "--max-price", help="Refuse any backend pricier than this $/hr (fail-closed cap)"
+    ),
 ) -> None:
     """Run a job on a backend, wait for it, and print the result.
 
@@ -726,6 +790,8 @@ def job_run(
         requirements=list(requirement),
         timeout=timeout,
         resumable=resumable,
+        spot=spot,
+        max_price_usd_hr=max_price,
     )
 
     if detach:
@@ -749,14 +815,26 @@ def job_run(
         _run(_go_detached())
         return
 
+    # The cost-routing path (cheapest-first / fail-closed cap) needs the router too.
+    use_router = bool(allow) or cheapest or max_price is not None
+
     async def _go() -> None:
-        if allow:
-            names = [n.strip() for n in allow.split(",") if n.strip()]
+        if use_router:
+            names = [n.strip() for n in allow.split(",") if n.strip()] if allow else [backend]
             router = _make_router(names, state)
             try:
                 # --backend is the preferred first candidate; fail over to the rest on
                 # infra errors (a ran-but-failed user job is never retried elsewhere).
-                result = await router.run(spec, prefer=backend, fallback=True)
+                # With --cheapest/--max-price the candidate order becomes cost order and
+                # over-cap backends are refused fail-closed.
+                result = await router.run(
+                    spec,
+                    prefer=backend,
+                    fallback=True,
+                    cheapest=cheapest,
+                    spot=spot,
+                    max_price_usd_hr=max_price,
+                )
                 _print_job_result(result)
             finally:
                 await router.aclose()
