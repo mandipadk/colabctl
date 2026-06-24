@@ -137,8 +137,10 @@ launches long work and does other things while it runs.
 ## Backends
 
 One job API (`submit / status / logs / result / cancel`) with capability-based routing
-and automatic failover — a Colab outage or quota block degrades to another backend
-instead of failing.
+and opt-in failover: `colabctl job run --backend colab --allow colab,modal,vertex` tries
+each backend in turn, so a Colab outage or quota block degrades to the next instead of
+failing. (Failover re-runs the job on the next backend, so use `--allow` for idempotent
+work; a job that *ran* but whose code failed is never retried elsewhere.)
 
 | Backend | What it's for | ToS posture | Live-validated |
 |---|---|---|---|

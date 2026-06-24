@@ -21,8 +21,9 @@ import typer
 from colabctl import __version__
 from colabctl.auth.base import ADC_LOGIN_SCOPES, AuthProvider
 from colabctl.auth.diagnostics import COLABORATORY_SCOPE, DRIVE_FILE_SCOPE, scopes_of, token_info
-from colabctl.backends.base import Backend, JobSpec
-from colabctl.backends.factory import BACKEND_NAMES, build_backend
+from colabctl.backends.base import Backend, JobResult, JobSpec
+from colabctl.backends.factory import BACKEND_NAMES, build_backend, build_router
+from colabctl.backends.router import BackendRouter
 from colabctl.errors import ColabctlError, TooManyAssignmentsError
 from colabctl.models import Accelerator, CcuInfo, SessionInfo
 from colabctl.sdk.client import ColabClient, _resolve_accelerator, _resolve_ladder
@@ -495,6 +496,22 @@ def _make_backend(name: str, state: _State) -> Backend:
     )
 
 
+def _make_router(names: list[str], state: _State) -> BackendRouter:
+    """Build a capability-routing, infra-failover router over named backends (patched in tests)."""
+    return build_router(
+        names, transport_name=state.transport, auth_mode=state.auth, colab_bin=state.colab_bin
+    )
+
+
+def _print_job_result(result: JobResult) -> None:
+    _emit(result.stdout, result.stderr)
+    typer.echo(f"[{result.backend}] {result.state.value}", err=True)
+    if not result.ok:
+        if result.error:
+            typer.secho(f"error: {result.error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+
 def _make_detached_backend(state: _State) -> DetachedColabBackend:
     """Build the durable detached Colab backend (native-only; patched in tests)."""
     from colabctl.jobs.backend import DetachedColabBackend
@@ -520,6 +537,13 @@ def job_run(
     ),
     resumable: bool = typer.Option(
         False, "--resumable", help="Mark a detached job auto-resumable after a runtime re-assign"
+    ),
+    allow: str | None = typer.Option(
+        None,
+        "--allow",
+        help="Comma-separated backends to fail over across on infra errors, e.g. "
+        "'colab,modal,vertex'. --backend is tried first; the job is RE-RUN on the next "
+        "backend if one fails to allocate, so use this only for idempotent jobs.",
     ),
 ) -> None:
     """Run a job on a backend, wait for it, and print the result.
@@ -567,17 +591,22 @@ def job_run(
         return
 
     async def _go() -> None:
-        backend_obj = _make_backend(backend, state)
-        try:
-            result = await backend_obj.run(spec)
-            _emit(result.stdout, result.stderr)
-            typer.echo(f"[{result.backend}] {result.state.value}", err=True)
-            if not result.ok:
-                if result.error:
-                    typer.secho(f"error: {result.error}", fg=typer.colors.RED, err=True)
-                raise typer.Exit(1)
-        finally:
-            await backend_obj.aclose()
+        if allow:
+            names = [n.strip() for n in allow.split(",") if n.strip()]
+            router = _make_router(names, state)
+            try:
+                # --backend is the preferred first candidate; fail over to the rest on
+                # infra errors (a ran-but-failed user job is never retried elsewhere).
+                result = await router.run(spec, prefer=backend, fallback=True)
+                _print_job_result(result)
+            finally:
+                await router.aclose()
+        else:
+            backend_obj = _make_backend(backend, state)
+            try:
+                _print_job_result(await backend_obj.run(spec))
+            finally:
+                await backend_obj.aclose()
 
     _run(_go())
 

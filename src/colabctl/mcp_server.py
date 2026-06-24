@@ -18,7 +18,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from colabctl.backends.base import Backend, JobSpec
-from colabctl.backends.factory import BACKEND_NAMES, build_backend
+from colabctl.backends.factory import BACKEND_NAMES, build_backend, build_router
+from colabctl.backends.router import BackendRouter
 from colabctl.errors import ConfigurationError
 from colabctl.models import Accelerator, ExecutionResult, SessionInfo
 from colabctl.sdk.client import ColabClient
@@ -128,8 +129,13 @@ def _accelerator(gpu: str) -> Accelerator:
 class JobTools:
     """Batch-job MCP tools over the provider abstraction (Colab / Modal / Vertex)."""
 
-    def __init__(self, backend_factory: Callable[[str], Backend] = build_backend) -> None:
+    def __init__(
+        self,
+        backend_factory: Callable[[str], Backend] = build_backend,
+        router_factory: Callable[[list[str]], BackendRouter] = build_router,
+    ) -> None:
         self._factory = backend_factory
+        self._router_factory = router_factory
         self._cache: dict[str, Backend] = {}
 
     def _backend(self, name: str) -> Backend:
@@ -144,15 +150,28 @@ class JobTools:
         gpu: str = "T4",
         requirements: list[str] | None = None,
         timeout: int | None = None,
+        allow: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Run Python ``code`` on a backend (colab/modal/vertex) and return the result."""
+        """Run Python ``code`` on a backend (colab/modal/vertex) and return the result.
+
+        Pass ``allow`` (e.g. ``["colab", "modal"]``) to fail over across backends on infra
+        errors — ``backend`` is preferred first. The job is re-run on the next backend if
+        one fails to allocate, so use ``allow`` only for idempotent work.
+        """
         spec = JobSpec(
             code=code,
             accelerator=_accelerator(gpu),
             requirements=requirements or [],
             timeout=timeout,
         )
-        result = await self._backend(backend).run(spec)
+        if allow:
+            router = self._router_factory(allow)
+            try:
+                result = await router.run(spec, prefer=backend, fallback=True)
+            finally:
+                await router.aclose()
+        else:
+            result = await self._backend(backend).run(spec)
         return {
             "backend": result.backend,
             "state": result.state.value,
