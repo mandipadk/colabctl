@@ -112,3 +112,54 @@ async def test_run_all_fail_raises():
     )
     with pytest.raises(ColabctlError):
         await router.run(JobSpec(code="x", accelerator=Accelerator.T4))
+
+
+# --- cheapest-first cost routing (Phase 2a) ---------------------------------
+
+
+def _priced_router():
+    # Names match the static price table: A100 → colab $1.50, runpod $1.89, modal $2.50.
+    return BackendRouter(
+        [
+            FakeBackend("modal", ["A100", "H100"]),
+            FakeBackend("colab", ["A100"]),
+            FakeBackend("runpod", ["A100", "H100"]),
+        ]
+    )
+
+
+async def test_cost_ranked_orders_cheapest_first():
+    router = _priced_router()
+    ranked = await router.cost_ranked(JobSpec(code="x", accelerator=Accelerator.A100))
+    assert [b.name for (b, _p) in ranked] == ["colab", "runpod", "modal"]
+
+
+async def test_cost_ranked_cap_is_fail_closed():
+    router = _priced_router()
+    ranked = await router.cost_ranked(
+        JobSpec(code="x", accelerator=Accelerator.A100), max_price_usd_hr=2.0
+    )
+    assert [b.name for (b, _p) in ranked] == ["colab", "runpod"]  # modal ($2.50) dropped
+
+
+async def test_cost_ranked_spot_only_keeps_spot_backends():
+    router = _priced_router()
+    ranked = await router.cost_ranked(JobSpec(code="x", accelerator=Accelerator.A100), spot=True)
+    # only runpod has a spot A100 in the static table
+    assert [b.name for (b, _p) in ranked] == ["runpod"]
+
+
+async def test_run_cheapest_uses_lowest_priced_backend_first():
+    router = _priced_router()
+    await router.run(JobSpec(code="x", accelerator=Accelerator.A100), cheapest=True)
+    ran = {b.name: b.run_calls for b in router._backends.values()}
+    assert ran["colab"] == 1 and ran["modal"] == 0 and ran["runpod"] == 0  # cheapest ran
+
+
+async def test_run_with_cap_refuses_fail_closed_when_none_qualify():
+    router = _priced_router()
+    with pytest.raises(AllocationError, match="fail-closed budget cap"):
+        await router.run(
+            JobSpec(code="x", accelerator=Accelerator.A100), max_price_usd_hr=1.0
+        )  # nothing ≤ $1.00/hr → refuse, don't pick a pricier one
+    assert all(b.run_calls == 0 for b in router._backends.values())  # never launched
