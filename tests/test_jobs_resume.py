@@ -126,6 +126,21 @@ async def test_resumable_job_auto_resumes_on_reclaim(store: StateStore, tmp_path
     assert record.events[-1].to_state is JobState.SUCCEEDED
 
 
+async def test_resume_stitches_log_with_incarnation_marker(
+    store: StateStore, tmp_path: Path
+) -> None:
+    t = ScriptedTransport()
+    backend = _backend(t, store, tmp_path)
+    info = await backend.submit(JobSpec(code="train()", resumable=True, name="j"))
+
+    t.reclaim_next_poll = True
+    await backend.status(info.id)  # poll reclaims → resume (incarnation 1 → 2)
+
+    logs = await backend.logs(info.id)
+    # The re-assign is visible in the stitched log instead of a silent reset to zero.
+    assert "incarnation 1 runtime reclaimed; resuming as incarnation 2" in logs
+
+
 async def test_non_resumable_job_surfaces_reclaim(store: StateStore, tmp_path: Path) -> None:
     t = ScriptedTransport()
     backend = _backend(t, store, tmp_path)

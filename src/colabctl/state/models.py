@@ -146,6 +146,10 @@ class StoredJob(BaseModel):
     max_incarnations: int = 3
     #: Append-only transition history (when/why each state change + on which incarnation).
     events: list[JobEvent] = Field(default_factory=list)
+    #: Stitched logs from prior incarnations + boundary markers, so a re-assign doesn't
+    #: silently reset the log view to zero. ``logs``/``result`` prepend this to the current
+    #: incarnation's live log; the current runtime's log is always read live from the VM.
+    archived_log: str = ""
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

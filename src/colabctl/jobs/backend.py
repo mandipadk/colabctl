@@ -179,10 +179,11 @@ class DetachedColabBackend(Backend):
         )
 
     async def logs(self, job_id: str) -> str:
-        """Full log so far (reads from offset 0; use :meth:`log_tail` to follow)."""
+        """Full log so far — prior incarnations (stitched, with boundary markers) followed by
+        the current runtime's live log. Use :meth:`log_tail` to follow the current runtime."""
         job = self._require(job_id)
         data, _ = await self._drain(job, offset=0)
-        return data.decode(errors="replace")
+        return job.archived_log + data.decode(errors="replace")
 
     async def log_tail(self, job_id: str, *, offset: int | None = None) -> tuple[str, int]:
         """Incremental log read from ``offset`` (default: the persisted one), persisting the offset.
@@ -202,7 +203,7 @@ class DetachedColabBackend(Backend):
         snapshot = await self._poll_until_terminal(job)
         state = job_state_from(snapshot)
         data, _ = await self._drain(job, offset=0)
-        text = data.decode(errors="replace")
+        text = job.archived_log + data.decode(errors="replace")
         exit_code = snapshot.get("exit_code")
         error = text[-400:] if state is JobState.FAILED and text else None
         return JobResult(
@@ -382,6 +383,12 @@ class DetachedColabBackend(Backend):
             timeout=job.timeout,
         )
         prior_state = job.state
+        # Record the incarnation boundary in the stitched log so the re-assign is visible
+        # and the prior runtime's logs aren't silently replaced by a fresh-from-zero view.
+        job.archived_log += (
+            f"\n--- [colabctl] incarnation {job.incarnations} runtime reclaimed; "
+            f"resuming as incarnation {job.incarnations + 1} ---\n"
+        )
         job.session_name = session.name
         job.pid = launched.pid
         job.remote_dir = launched.remote_dir
