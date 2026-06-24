@@ -64,6 +64,43 @@ class AllocationGate:
     backoff_base: float = DEFAULT_BACKOFF_BASE
     backoff_max: float = DEFAULT_BACKOFF_MAX
     sleep: Callable[[float], Awaitable[None]] = _default_sleep
+    #: A cumulative USD budget over the spend ledger. None = no dollar cap (only the attempt
+    #: cap + backoff apply). Enforced FAIL-CLOSED by :meth:`authorize`.
+    budget_usd: float | None = None
+
+    def authorize(
+        self,
+        *,
+        rate_usd_hr: float,
+        spent_usd: float = 0.0,
+        est_hours: float | None = None,
+        max_price_usd_hr: float | None = None,
+        what: str,
+    ) -> float:
+        """Fail-closed budget check before a (re-)allocation; returns the estimated cost.
+
+        Two ceilings, both *guarantees* not preferences (OpenRouter ``max_price`` semantics —
+        when in doubt, refuse, never silently pick a pricier option):
+
+        * **Per-job ceiling** — refuse if ``rate_usd_hr`` exceeds ``max_price_usd_hr``.
+        * **Cumulative budget** — refuse if ``spent_usd`` plus this allocation's estimated cost
+          would exceed ``budget_usd``. ``spent_usd`` comes from the persisted spend ledger, so a
+          restart/auto-resume can't reset cumulative spend and bypass the cap.
+
+        Free rates (``0.0``, e.g. Colab/Kaggle) always pass.
+        """
+        if max_price_usd_hr is not None and rate_usd_hr > max_price_usd_hr:
+            raise AllocationError(
+                f"{what}: ${rate_usd_hr:.2f}/hr exceeds the per-job cap of "
+                f"${max_price_usd_hr:.2f}/hr; refusing to launch (no cheaper backend qualifies)."
+            )
+        est = rate_usd_hr * (est_hours if est_hours is not None else 1.0)
+        if self.budget_usd is not None and spent_usd + est > self.budget_usd:
+            raise AllocationError(
+                f"{what}: this allocation (~${est:.2f}) would push spend to "
+                f"${spent_usd + est:.2f}, over the ${self.budget_usd:.2f} budget; refusing."
+            )
+        return est
 
     async def before_attempt(self, attempt: int, max_attempts: int, *, what: str) -> None:
         """Gate the ``attempt``-th (1-based) allocation for ``what``; raise if exhausted."""

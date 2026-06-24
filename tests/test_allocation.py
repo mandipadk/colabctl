@@ -61,3 +61,32 @@ async def test_zero_base_disables_backoff():
     for attempt in range(1, 6):
         await gate.before_attempt(attempt, 10, what="s")
     assert slept == []  # base 0 → every delay is 0 → sleep never invoked
+
+
+def test_authorize_per_job_ceiling_is_fail_closed():
+    gate = AllocationGate()
+    # at/under the cap → allowed, returns the estimated cost
+    assert gate.authorize(rate_usd_hr=2.0, est_hours=3.0, max_price_usd_hr=3.0, what="job") == 6.0
+    # over the cap → refuse (a guarantee, not a preference)
+    with pytest.raises(AllocationError, match="exceeds the per-job cap"):
+        gate.authorize(rate_usd_hr=4.0, max_price_usd_hr=3.0, what="job")
+
+
+def test_authorize_cumulative_budget_is_fail_closed():
+    gate = AllocationGate(budget_usd=10.0)
+    # already spent 8, this would add 1 → 9 ≤ 10 → ok
+    assert gate.authorize(rate_usd_hr=1.0, est_hours=1.0, spent_usd=8.0, what="job") == 1.0
+    # already spent 9.5, this adds 1 → 10.5 > 10 → refuse
+    with pytest.raises(AllocationError, match=r"over the .* budget"):
+        gate.authorize(rate_usd_hr=1.0, est_hours=1.0, spent_usd=9.5, what="job")
+
+
+def test_authorize_free_rate_always_passes():
+    gate = AllocationGate(budget_usd=0.0)  # zero budget
+    # a free backend ($0/hr, e.g. Colab/Kaggle) never trips the cap, even at budget 0
+    assert gate.authorize(rate_usd_hr=0.0, spent_usd=0.0, max_price_usd_hr=0.0, what="job") == 0.0
+
+
+def test_authorize_defaults_to_one_hour_when_no_estimate():
+    gate = AllocationGate()
+    assert gate.authorize(rate_usd_hr=2.5, what="job") == 2.5  # est_hours defaults to 1.0

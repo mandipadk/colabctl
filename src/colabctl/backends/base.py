@@ -47,6 +47,11 @@ class JobSpec(BaseModel):
     env: dict[str, str] = {}
     timeout: int | None = None
     name: str | None = None
+    #: Prefer the interruptible/spot tier where a backend offers one (cheaper, preemptible).
+    spot: bool = False
+    #: Per-job fail-closed price ceiling — refuse to launch on any backend pricier than this
+    #: ``$/hr`` (a budget *guarantee*, not a preference; OpenRouter ``max_price`` semantics).
+    max_price_usd_hr: float | None = None
     #: Whether the workload resumes idempotently from its own checkpoint after a
     #: runtime re-assign — the opt-in that lets the lifecycle manager auto-resume a
     #: detached job on reclamation (plan Pillar 2) rather than failing it.
@@ -104,6 +109,13 @@ class BackendCapabilities(BaseModel):
     max_runtime_seconds: int | None = None
     requires_account: bool = True
     tos_posture: str = "sanctioned"  # "sanctioned" | "gray-area" | "prohibited"
+    #: Cost-engine flags (Phase 2). ``supports_spot``: offers an interruptible tier.
+    #: ``prepaid_wallet``: spend is gated by a prepaid balance (Vast/RunPod).
+    #: ``preempt_notice_seconds``: graceful-drain window before a spot preemption
+    #: (0 = none — the client must checkpoint frequently).
+    supports_spot: bool = False
+    prepaid_wallet: bool = False
+    preempt_notice_seconds: int | None = None
     notes: list[str] = []
 
     def supports(self, accelerator: Accelerator) -> bool:
