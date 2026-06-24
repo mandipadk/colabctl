@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "colabctl"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Programmatic control of Google Colab for developers and AI agents — allocate GPUs, run code & notebooks, sync files, without the website."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "colabctl contributors" }]
 keywords = ["colab", "gpu", "jupyter", "mcp", "ml", "remote-execution"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -77,8 +77,14 @@ dev = [
 Homepage = "https://github.com/mandipadk/colabctl"
 Documentation = "https://github.com/mandipadk/colabctl/tree/main/docs"
 
+[tool.hatch.version]
+# Single source of truth: __version__ in the package __init__.
+path = "src/colabctl/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/colabctl"]
+# Ship the PEP 561 marker so downstream type-checkers see colabctl as typed.
+artifacts = ["src/colabctl/py.typed"]
 
 [tool.ruff]
 line-length = 100

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from colabctl.errors import SecretStoreError
+from colabctl.fsutil import FileLock, atomic_write
 from colabctl.secrets.base import DEFAULT_SERVICE, SecretStore
 
 _ENV_PASSPHRASE = "COLABCTL_SECRET_PASSPHRASE"
@@ -39,6 +40,7 @@ class EncryptedFileSecretStore(SecretStore):
 
     def __init__(self, *, path: Path | None = None, passphrase: str | None = None) -> None:
         self._path = path or _default_path()
+        self._lock_path = self._path.with_name(self._path.name + ".lock")
         pw = passphrase if passphrase is not None else os.environ.get(_ENV_PASSPHRASE)
         if not pw:
             raise SecretStoreError(
@@ -53,14 +55,17 @@ class EncryptedFileSecretStore(SecretStore):
         return self._load().get(self._key(service, account))
 
     def set(self, account: str, value: str, *, service: str = DEFAULT_SERVICE) -> None:
-        data = self._load()
-        data[self._key(service, account)] = value
-        self._save(data)
+        # Lock the whole read-modify-write so two concurrent writers can't lose updates.
+        with FileLock(self._lock_path, exclusive=True):
+            data = self._load()
+            data[self._key(service, account)] = value
+            self._save(data)
 
     def delete(self, account: str, *, service: str = DEFAULT_SERVICE) -> None:
-        data = self._load()
-        if data.pop(self._key(service, account), None) is not None:
-            self._save(data)
+        with FileLock(self._lock_path, exclusive=True):
+            data = self._load()
+            if data.pop(self._key(service, account), None) is not None:
+                self._save(data)
 
     def list_accounts(self, *, service: str = DEFAULT_SERVICE) -> list[str]:
         prefix = f"{service}\x00"
@@ -109,9 +114,10 @@ class EncryptedFileSecretStore(SecretStore):
             "salt": base64.b64encode(salt).decode(),
             "data": token.decode(),
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(envelope))
-        self._path.chmod(0o600)
+        # Atomic temp-file + fsync + os.replace, created 0600 with a 0700 parent — so a
+        # crash mid-write can never corrupt the existing store, and there is no window in
+        # which the ciphertext is world-readable.
+        atomic_write(self._path, json.dumps(envelope), mode=0o600)
 
     def _existing_salt(self) -> bytes | None:
         if not self._path.exists():

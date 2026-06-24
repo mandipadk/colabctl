@@ -20,18 +20,17 @@ The store deliberately holds **no credentials** — only the metadata in
 
 from __future__ import annotations
 
-import contextlib
 import os
-import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from types import TracebackType
 
 from pydantic import ValidationError
 
 from colabctl.errors import StateError
+from colabctl.fsutil import FileLock as _FileLock
+from colabctl.fsutil import atomic_write as _atomic_write
 from colabctl.observability import get_logger
 from colabctl.state.models import (
     SCHEMA_VERSION,
@@ -43,71 +42,11 @@ from colabctl.state.models import (
 
 _log = get_logger("state")
 
-try:  # POSIX advisory locking (macOS + Linux — the stated deploy targets).
-    import fcntl
-
-    _HAVE_FCNTL = True
-except ImportError:  # pragma: no cover - non-POSIX fallback
-    _HAVE_FCNTL = False
-
 
 def default_home() -> Path:
     """Resolve the colabctl home directory (``$COLABCTL_HOME`` or ``~/.colabctl``)."""
     env = os.environ.get("COLABCTL_HOME")
     return Path(env).expanduser() if env else Path.home() / ".colabctl"
-
-
-class _FileLock:
-    """A POSIX ``flock`` advisory lock scoped to a ``with`` block.
-
-    Degrades to a no-op where ``fcntl`` is unavailable; the atomic ``os.replace``
-    still guarantees readers never see a torn file, so the worst case without real
-    locking is a last-writer-wins race between two concurrent writers — acceptable
-    for a single user's tooling, and not a concern on the supported platforms.
-    """
-
-    def __init__(self, path: Path, *, exclusive: bool = True) -> None:
-        self._path = path
-        self._exclusive = exclusive
-        self._fd: int | None = None
-
-    def __enter__(self) -> _FileLock:
-        self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._fd = os.open(self._path, os.O_CREAT | os.O_RDWR, 0o600)
-        if _HAVE_FCNTL:
-            fcntl.flock(self._fd, fcntl.LOCK_EX if self._exclusive else fcntl.LOCK_SH)
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        if self._fd is not None:
-            try:
-                if _HAVE_FCNTL:
-                    fcntl.flock(self._fd, fcntl.LOCK_UN)
-            finally:
-                os.close(self._fd)
-                self._fd = None
-
-
-def _atomic_write(path: Path, data: str) -> None:
-    """Write ``data`` to ``path`` atomically (temp file + fsync + ``os.replace``)."""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".state-", suffix=".tmp")
-    tmp_path = Path(tmp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp_path.replace(path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            tmp_path.unlink()
-        raise
 
 
 class StateStore:

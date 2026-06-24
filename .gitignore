@@ -26,3 +26,6 @@ spikes/phase0_*.png
 # Secrets / local config (never commit)
 .env
 *.token.json
+
+# Internal planning docs (strategy — not for public release)
+docs/plan-100x.md
