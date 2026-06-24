@@ -1,18 +1,23 @@
 name: colab-canary
 
-# Weekly live canary: detects Google /tun/m/* protocol drift + end-to-end breakage.
-# Opt-in — skips cleanly unless the GOOGLE_ADC_JSON secret is set (an exported ADC
-# `application_default_credentials.json` for a Colab Pro account, scoped per
-# `colabctl auth scopes`). Costs a few compute-unit-minutes per run.
+# Daily live canary: detects Google /tun/m/* protocol drift + end-to-end breakage before
+# users do, and files/updates a GitHub issue on failure. Opt-in — skips cleanly unless the
+# GOOGLE_ADC_JSON secret is set (an exported ADC `application_default_credentials.json` for
+# a Colab Pro account, scoped per `colabctl auth scopes`). Costs a few compute-unit-minutes
+# per run. (Drift is the dominant external risk; a weekly cadence left up to ~6 days of
+# undetected breakage.)
 
 on:
   schedule:
-    - cron: "0 14 * * 1" # Mondays 14:00 UTC
+    - cron: "0 14 * * *" # daily 14:00 UTC
   workflow_dispatch: {}
 
 jobs:
   canary:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -38,9 +43,40 @@ jobs:
           mkdir -p "$HOME/.config/gcloud"
           printf '%s' "$ADC" > "$HOME/.config/gcloud/application_default_credentials.json"
 
+      - name: Assert baseline integrity
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          # The canary auto-establishes a baseline when one is missing and reports HEALTHY,
+          # which would silently disable drift detection. Fail loudly if it's absent.
+          test -f spikes/canary-baseline.json || {
+            echo "::error::spikes/canary-baseline.json is missing — drift detection would silently re-baseline"
+            exit 1
+          }
+
       - name: Run canary
         if: steps.gate.outputs.skip != 'true'
         env:
           COLABCTL_ENABLE_NATIVE: "1"
           COLABCTL_QUOTA_PROJECT: ${{ secrets.COLABCTL_QUOTA_PROJECT }}
         run: uv run --extra native python spikes/canary.py
+
+      - name: File/update a failure issue
+        if: failure() && steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Canary failed — possible Colab /tun/m/* drift or outage"
+          body="The daily canary failed: ${RUN_URL}
+
+          This usually means Google changed the Colab protocol (the canary's fingerprint
+          drifted) or an end-to-end break (allocate / execute / transfer / teardown). Check
+          the run, compare against spikes/canary-baseline.json, and re-baseline only after
+          confirming the new shape is correct."
+          existing=$(gh issue list --search "Canary failed in:title" --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

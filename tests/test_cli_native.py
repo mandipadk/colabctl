@@ -159,3 +159,13 @@ def test_too_many_assignments_suggests_gc(monkeypatch) -> None:
     result = runner.invoke(cli_mod.app, ["sessions"])
     assert result.exit_code == 1
     assert "gc --release-orphans" in result.output
+
+
+def test_exec_streams_output_without_duplicating(monkeypatch) -> None:
+    # FakeTransport streams the output via on_output; the CLI must print it live and NOT
+    # also emit the buffered result, so it appears exactly once (not doubled).
+    transport = FakeTransport(execute_text="HELLO_STREAM")
+    monkeypatch.setattr(cli_mod, "_make_client", lambda state: ColabClient(transport=transport))
+    result = runner.invoke(cli_mod.app, ["exec", "-s", "foo", "-c", "print(1)"])
+    assert result.exit_code == 0
+    assert result.output.count("HELLO_STREAM") == 1

@@ -25,7 +25,7 @@ from colabctl.backends.base import Backend, JobResult, JobSpec
 from colabctl.backends.factory import BACKEND_NAMES, build_backend, build_router
 from colabctl.backends.router import BackendRouter
 from colabctl.errors import ColabctlError, TooManyAssignmentsError
-from colabctl.models import Accelerator, CcuInfo, SessionInfo
+from colabctl.models import Accelerator, CcuInfo, ExecutionResult, Output, SessionInfo
 from colabctl.sdk.client import ColabClient, _resolve_accelerator, _resolve_ladder
 from colabctl.spend import spend_report
 from colabctl.transport.native import NativeColabTransport
@@ -100,6 +100,37 @@ def _emit(result_text: str, stderr_text: str) -> None:
         typer.echo(result_text, nl=not result_text.endswith("\n"))
     if stderr_text:
         typer.echo(stderr_text, err=True, nl=not stderr_text.endswith("\n"))
+
+
+class _StreamPrinter:
+    """An ``on_output`` callback that prints outputs live as they stream in.
+
+    Records whether it printed anything, so the caller can fall back to a single buffered
+    emit for transports that don't stream (then the output isn't lost or doubled).
+    """
+
+    def __init__(self) -> None:
+        self.printed = False
+
+    def __call__(self, output: Output) -> None:
+        text = getattr(output, "text", None)
+        if not text:
+            return
+        self.printed = True
+        typer.echo(text, nl=False, err=getattr(output, "name", "") == "stderr")
+
+
+def _finish_run(result: ExecutionResult, printer: _StreamPrinter) -> None:
+    """Finish a `run`/`exec`: if output streamed live, just cap it (and surface a concise
+    error on failure); otherwise emit the buffered result once (non-streaming transports)."""
+    if printer.printed:
+        typer.echo("")  # newline to terminate the streamed output
+        if not result.ok and result.error:
+            typer.secho(f"error: {result.error}", fg=typer.colors.RED, err=True)
+    else:
+        _emit(result.text, result.stderr)
+    if not result.ok:
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -262,10 +293,9 @@ def run(
             await _spend_guard(client, gpu, yes)
             session = await client.allocate(gpu=gpu, keep=keep)
             async with session:
-                result = await session.run_file(file, timeout=timeout)
-                _emit(result.text, result.stderr)
-                if not result.ok:
-                    raise typer.Exit(1)
+                printer = _StreamPrinter()
+                result = await session.run_file(file, timeout=timeout, on_output=printer)
+                _finish_run(result, printer)
 
     _run(_go())
 
@@ -283,10 +313,9 @@ def exec_(
 
     async def _go() -> None:
         async with _make_client(state) as client:
-            result = await client.attach(session).run(source, timeout=timeout)
-            _emit(result.text, result.stderr)
-            if not result.ok:
-                raise typer.Exit(1)
+            printer = _StreamPrinter()
+            result = await client.attach(session).run(source, timeout=timeout, on_output=printer)
+            _finish_run(result, printer)
 
     _run(_go())
 
