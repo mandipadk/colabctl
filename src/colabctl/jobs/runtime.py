@@ -42,7 +42,14 @@ _STATE_MAP = {
 
 
 def job_state_from(status: dict[str, object]) -> JobState:
-    """Translate a poll snapshot's ``state`` into a :class:`JobState`."""
+    """Translate a poll snapshot's ``state`` into a :class:`JobState`.
+
+    A snapshot that still says ``running`` but whose runner process is no longer alive
+    (``runner_alive`` is False) means the runner was killed without writing a terminal state
+    (OOM, SIGKILL) — resolve it to FAILED so the job can't lie RUNNING forever.
+    """
+    if status.get("state") == "running" and status.get("runner_alive") is False:
+        return JobState.FAILED
     return _STATE_MAP.get(str(status.get("state", "unknown")), JobState.UNKNOWN)
 
 

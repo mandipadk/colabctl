@@ -167,7 +167,9 @@ class DetachedColabBackend(Backend):
         job = self._require(job_id)
         snapshot = await self._poll_or_resume(job)
         state = job_state_from(snapshot)
-        self._persist_state(job, state, snapshot.get("exit_code"))
+        self._persist_state(
+            job, state, snapshot.get("exit_code"), reason=self._terminal_reason(snapshot, state)
+        )
         return JobInfo(
             id=job_id,
             backend=self.name,
@@ -287,10 +289,23 @@ class DetachedColabBackend(Backend):
             raise ColabctlError(f"Job {job.id!r} has no session to reattach to.")
         return job.session_name
 
-    def _persist_state(self, job: StoredJob, state: JobState, exit_code: object) -> None:
+    @staticmethod
+    def _terminal_reason(snapshot: dict[str, object], state: JobState) -> str | None:
+        if state is JobState.FAILED and snapshot.get("runner_alive") is False:
+            return "runner process died"
+        return None
+
+    def _persist_state(
+        self, job: StoredJob, state: JobState, exit_code: object, *, reason: str | None = None
+    ) -> None:
         if state != job.state:
             job.events.append(
-                JobEvent(from_state=job.state, to_state=state, incarnation=job.incarnations)
+                JobEvent(
+                    from_state=job.state,
+                    to_state=state,
+                    incarnation=job.incarnations,
+                    reason=reason,
+                )
             )
         job.state = state
         if isinstance(exit_code, int):
@@ -300,8 +315,14 @@ class DetachedColabBackend(Backend):
     async def _poll_until_terminal(self, job: StoredJob) -> dict[str, object]:
         while True:
             snapshot = await self._poll_or_resume(job)
-            if job_state_from(snapshot).is_terminal:
-                self._persist_state(job, job_state_from(snapshot), snapshot.get("exit_code"))
+            state = job_state_from(snapshot)
+            if state.is_terminal:
+                self._persist_state(
+                    job,
+                    state,
+                    snapshot.get("exit_code"),
+                    reason=self._terminal_reason(snapshot, state),
+                )
                 return snapshot
             await asyncio.sleep(self._poll_interval)
 

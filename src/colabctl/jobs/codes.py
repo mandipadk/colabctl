@@ -196,6 +196,17 @@ def build_poll_code(job_id: str, *, root: str = DEFAULT_JOBS_ROOT) -> str:
         "    _doc = {'state': 'missing'}\n"
         "if os.path.exists(_e):\n"
         "    _doc['exit_code'] = int(open(_e).read().strip() or '-1')\n"
+        # Liveness: a 'running' status with no exit_code whose runner pid is gone means the
+        # runner was killed (OOM/SIGKILL) without writing a terminal state — flag it so the
+        # client resolves the job to FAILED instead of lying RUNNING forever.
+        "_pid = _doc.get('pid')\n"
+        "if _doc.get('state') == 'running' and 'exit_code' not in _doc and isinstance(_pid, int):\n"
+        "    try:\n"
+        "        os.kill(_pid, 0); _doc['runner_alive'] = True\n"
+        "    except ProcessLookupError:\n"
+        "        _doc['runner_alive'] = False\n"
+        "    except OSError:\n"
+        "        _doc['runner_alive'] = True\n"
         "_doc['log_size'] = os.path.getsize(_l) if os.path.exists(_l) else 0\n"
         f"{_frame_print('json.dumps(_doc)')}\n"
     )
