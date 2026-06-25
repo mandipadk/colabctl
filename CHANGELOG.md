@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-06-25
+
+Phase 2c finale (the spot tier) + an Agent Skill so AI agents can discover and drive colabctl.
+
+### Added
+
+- **Vast.ai backend** (`--backend vast`) — a bid-marketplace GPU backend (raw `/api/v0` over
+  httpx, no SDK). Searches host offers filtered by reliability, picks the cheapest, and
+  bid-launches a spot/interruptible instance (`--spot`, needs a `--max-price` bid; fail-closed).
+  Now the cheapest A100/spot in the price table, so cost routing prefers it.
+- **Spot preemption recovery** — preemption (which Vast gives *no* warning for; detected via the
+  `actual_status`/`intended_status` tuple) raises a retriable error *after* tearing the host
+  down, so the existing bounded router failover re-bids on the next candidate or falls back to
+  on-demand for idempotent jobs. RunPod's uncleared bid takes the same path.
+- **Agent Skill + `colabctl skill install`** — ships a Claude Code Agent Skill (bundled in the
+  wheel) so an AI agent *discovers* colabctl and knows which commands/examples to use — the
+  know-how layer that complements the MCP server's typed tools. `colabctl skill install
+  [--user|--project] [--force]` / `status` / `uninstall` copies it into `~/.claude/skills/`
+  (Claude Code doesn't scan site-packages); version-stamped, with an opt-out first-run hint
+  (`COLABCTL_NO_SKILL_HINT`). Added `AGENTS.md` for contributors.
+
 ## [0.3.6] - 2026-06-24
 
 Cost-aware arbitrage engine (Phase 2a + 2b + first 2c) — route to the cheapest qualifying
