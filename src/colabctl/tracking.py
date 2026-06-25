@@ -73,7 +73,10 @@ def resolve_tracking_env(
     env: dict[str, str] = {"COLABCTL_JOB_ID": job_id}
     has_key = False
     for account, var in _SECRET_ENV[track].items():
-        value = secret_get(account)
+        try:
+            value = secret_get(account)
+        except Exception:  # a missing/broken secret backend must fail-open, not crash the run
+            value = None
         if value:
             env[var] = value
             has_key = True

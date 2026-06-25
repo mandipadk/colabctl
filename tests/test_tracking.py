@@ -42,6 +42,14 @@ def test_wandb_fail_open_disables_when_no_key():
     assert env["WANDB_MODE"] == "disabled"  # runs the fn without W&B rather than blocking
 
 
+def test_resolve_fails_open_when_secret_store_raises():
+    def boom(_account: str) -> str | None:
+        raise RuntimeError("no keyring backend available")  # headless CI / no OS keychain
+
+    env = resolve_tracking_env("wandb", "j", secret_get=boom)
+    assert env["WANDB_MODE"] == "disabled"  # a broken secret backend must not crash the run
+
+
 def test_mlflow_env_and_token_xor_basic():
     env = resolve_tracking_env(
         "mlflow",
