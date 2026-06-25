@@ -199,6 +199,35 @@ def spend(
         typer.echo(f"  {ts}  {r.backend:<8} {r.accelerator.value:<5} ${r.est_cost_usd:>6.2f}")
 
 
+@app.command(name="spot-risk")
+def spot_risk(
+    gpu: str | None = typer.Option(None, "--gpu", help="One accelerator (default: all)"),
+) -> None:
+    """Spot interruption-rate + savings per accelerator (AWS EC2 reference, directional).
+
+    Helps decide whether a GPU's spot tier is worth it: prefer high savings among accelerators
+    whose interruption bucket is low. AWS-specific, so treat it as a directional reference for
+    colabctl's own spot backends (RunPod/Vast), not a per-backend guarantee.
+    """
+    from colabctl.cost.risk import SpotRiskSource
+
+    accel = _resolve_accelerator(gpu, None, default=Accelerator.A100) if gpu else None
+
+    async def _go() -> None:
+        rows = await SpotRiskSource().risk(accelerator=accel)
+        if not rows:
+            typer.echo("No spot-risk data (feed unreachable).")
+            return
+        typer.echo("spot interruption / savings (AWS EC2 reference, directional):")
+        for r in rows:
+            typer.echo(
+                f"  {r.accelerator.value:<5} interruption {r.range_label:<7}  "
+                f"savings ~{r.savings_pct}%  (n={r.samples})"
+            )
+
+    _run(_go())
+
+
 def _latest_pypi_version() -> str | None:
     """The latest colabctl version on PyPI (None if unreachable). Patched in tests."""
     import urllib.request
