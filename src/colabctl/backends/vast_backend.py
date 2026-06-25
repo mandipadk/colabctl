@@ -216,18 +216,22 @@ class VastBackend(Backend):
                     break
                 await asyncio.sleep(self._poll_interval)
         finally:
-            await self._destroy(job_id)  # never leave a host billing
-        preempted = self._require(job_id).spot and info.state is JobState.FAILED
+            await self._destroy(job_id)  # never leave a host billing (even if we raise below)
+        if self._require(job_id).spot and info.state is JobState.FAILED:
+            # No preemption warning on Vast — surface it as a retriable infra error so the
+            # router fails over (re-bid on another host / on-demand / another backend) for
+            # idempotent jobs, the same path RunPod's uncleared bid takes. Checkpoint to durable
+            # storage for spot, since the host is gone.
+            raise ColabctlError(
+                f"Vast spot instance {job_id} was preempted (outbid) — re-bid or fall back "
+                "to on-demand."
+            )
         return JobResult(
             id=job_id,
             backend=self.name,
             state=info.state,
             stdout="",  # not captured — see logs() / use a volume
-            error=(
-                "spot instance preempted (outbid) — re-bid or fall back to on-demand"
-                if preempted
-                else (None if info.state is JobState.SUCCEEDED else "see Vast console / volume")
-            ),
+            error=None if info.state is JobState.SUCCEEDED else "see Vast console / volume",
         )
 
     async def cancel(self, job_id: str) -> None:

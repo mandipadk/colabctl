@@ -107,16 +107,31 @@ async def test_vast_is_gpu_only():
         )
 
 
-async def test_vast_result_reports_preemption_and_destroys():
+async def test_vast_preemption_raises_for_failover_and_destroys():
     fake = FakeVast(status=("exited", "running"))  # preempted: left running, still intended
     backend = VastBackend(request=fake)
     info = await backend.submit(
         JobSpec(code="x=1", accelerator=Accelerator.A100, spot=True, max_price_usd_hr=1.0)
     )
-    result = await backend.result(info.id)
-    assert result.state is JobState.FAILED
-    assert result.error is not None and "preempted" in result.error
-    assert any(m == "DELETE" for (m, _p, _b) in fake.calls)  # host torn down (never left billing)
+    # preemption surfaces as a retriable infra error (so the router fails over)...
+    with pytest.raises(ColabctlError, match="preempted"):
+        await backend.result(info.id)
+    # ...and the host is still torn down even though we raised (the finally), never left billing
+    assert any(m == "DELETE" for (m, _p, _b) in fake.calls)
+
+
+async def test_router_recovers_from_vast_preemption_via_failover():
+    # The headline spot-recovery path: a preempted Vast bid fails over to the next candidate
+    # (here on-demand) instead of failing the job — reusing the existing bounded failover.
+    from colabctl.backends.router import BackendRouter
+    from conftest import FakeBackend
+
+    vast = VastBackend(request=FakeVast(status=("exited", "running")))  # preempts
+    fallback = FakeBackend("modal", accels=["A100"])
+    router = BackendRouter([vast, fallback], order=["vast", "modal"])
+    spec = JobSpec(code="train()", accelerator=Accelerator.A100, spot=True, max_price_usd_hr=1.0)
+    result = await router.run(spec, fallback=True)
+    assert result.backend == "modal" and result.state is JobState.SUCCEEDED
 
 
 async def test_vast_rental_rejected_is_infra_error():
