@@ -15,7 +15,9 @@ adjusting against the live API (override ``gpu_type_id`` / pass your own).
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +31,17 @@ from colabctl.backends.base import (
 )
 from colabctl.errors import ColabctlError, ConfigurationError
 from colabctl.models import Accelerator
+
+#: A GraphQL caller — ``(query, variables) -> data``. Injectable so the spot/bid path is
+#: tested without network or the SDK (which has no interruptible/bid parameter).
+GraphQL = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+# RunPod's SDK ``create_pod`` cannot set a bid, so spot goes through the legacy GraphQL
+# ``podRentInterruptable`` mutation (verified June 2026) with variables (no string-escaping).
+_RENT_INTERRUPTABLE = (
+    "mutation Rent($input: PodRentInterruptableInput!) {"
+    " podRentInterruptable(input: $input) { id desiredStatus } }"
+)
 
 # Accelerator → RunPod GPU type id (display names; best-effort).
 _RUNPOD_GPU: dict[Accelerator, str] = {
@@ -79,6 +92,7 @@ def _pod_status(pod: Any) -> str:
 @dataclass
 class _Job:
     info: JobInfo
+    spot: bool = False
 
 
 def _load_runpod(api_key: str | None) -> Any:
@@ -106,11 +120,17 @@ class RunPodBackend(Backend):
         image: str = _DEFAULT_IMAGE,
         container_disk_gb: int = 20,
         poll_interval: float = _POLL_INTERVAL,
+        bid_per_gpu: float | None = None,
+        cloud_type: str = "COMMUNITY",
+        graphql: GraphQL | None = None,
     ) -> None:
         self._api_key = api_key
         self._image = image
         self._container_disk_gb = container_disk_gb
         self._poll_interval = poll_interval
+        self._bid_per_gpu = bid_per_gpu
+        self._cloud_type = cloud_type
+        self._graphql = graphql or self._default_graphql
         self._jobs: dict[str, _Job] = {}
 
     @property
@@ -123,16 +143,24 @@ class RunPodBackend(Backend):
             persistent=False,
             requires_account=True,
             tos_posture="sanctioned",
+            supports_spot=True,
+            prepaid_wallet=True,
+            preempt_notice_seconds=120,  # RunPod gives ~2 min SIGTERM (not a hard contract)
             notes=[
                 "IaaS GPU pods — rents a machine; stdout is NOT captured (persist outputs "
                 "to a RunPod volume / object storage). result returns state + console link.",
                 "Per-second billing — always terminate; this backend terminates on result().",
-                "Requires RUNPOD_API_KEY.",
+                "Spot (--spot) bids via the GraphQL podRentInterruptable mutation (the SDK has "
+                "no bid param); needs a max bid (--max-price). Preemption is poll-only — "
+                "checkpoint to a volume; an outbid pod can vanish mid-run.",
+                "Prepaid wallet — an empty balance blocks/loses pods. Requires RUNPOD_API_KEY.",
             ],
         )
 
     async def submit(self, spec: JobSpec) -> JobInfo:
         gpu_type = runpod_gpu(spec.accelerator)  # validate early (GPU-only)
+        if spec.spot:
+            return await self._submit_spot(spec, gpu_type)
         runpod = _load_runpod(self._api_key)
         script = _build_script(spec)
 
@@ -158,6 +186,66 @@ class RunPodBackend(Backend):
         )
         self._jobs[info.id] = _Job(info=info)
         return info
+
+    async def _submit_spot(self, spec: JobSpec, gpu_type: str) -> JobInfo:
+        """Launch an interruptible (bid-priced) pod via the GraphQL podRentInterruptable path."""
+        bid = self._bid_per_gpu if self._bid_per_gpu is not None else spec.max_price_usd_hr
+        if bid is None:
+            raise ConfigurationError(
+                "RunPod spot needs a max bid per GPU-hour: set --max-price (or bid_per_gpu)."
+            )
+        script = _build_script(spec)
+        variables = {
+            "input": {
+                "bidPerGpu": bid,
+                "cloudType": self._cloud_type,
+                "gpuTypeId": gpu_type,
+                "gpuCount": 1,
+                "volumeInGb": 0,
+                "containerDiskInGb": self._container_disk_gb,
+                "imageName": self._image,
+                "dockerArgs": f"bash -c {shlex.quote(script)}",
+                "env": [{"key": k, "value": v} for k, v in (spec.env or {}).items()],
+            }
+        }
+        data = await self._graphql(_RENT_INTERRUPTABLE, variables)
+        rented = data.get("podRentInterruptable") or {}
+        pod_id = rented.get("id")
+        if not pod_id:
+            # No id ⇒ the bid didn't clear (outbid / no spot capacity). An infra error, so the
+            # router fails over to the next candidate (e.g. on-demand) for idempotent jobs.
+            raise ColabctlError(
+                f"RunPod spot bid (${bid}/GPU-hr) did not clear — no capacity or outbid."
+            )
+        info = JobInfo(
+            id=str(pod_id),
+            backend=self.name,
+            state=JobState.RUNNING,
+            accelerator=spec.accelerator,
+            detail=f"spot bid ${bid}/GPU-hr; https://www.runpod.io/console/pods/{pod_id}",
+        )
+        self._jobs[info.id] = _Job(info=info, spot=True)
+        return info
+
+    async def _default_graphql(
+        self, query: str, variables: dict[str, Any]
+    ) -> dict[str, Any]:  # pragma: no cover - exercised only against the live API
+        import httpx
+
+        key = self._api_key or os.environ.get("RUNPOD_API_KEY")
+        if not key:
+            raise ColabctlError("RunPod spot needs RUNPOD_API_KEY (GraphQL auth).")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"https://api.runpod.io/graphql?api_key={key}",
+                json={"query": query, "variables": variables},
+            )
+            resp.raise_for_status()
+            doc = resp.json()
+        if doc.get("errors"):
+            raise ColabctlError(f"RunPod GraphQL error: {doc['errors']}")
+        data: dict[str, Any] = doc.get("data") or {}
+        return data
 
     async def status(self, job_id: str) -> JobInfo:
         job = self._require(job_id)

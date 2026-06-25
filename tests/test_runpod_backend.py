@@ -73,3 +73,54 @@ async def test_runpod_cancel_terminates(monkeypatch):
     info = await backend.submit(JobSpec(code="x=1", accelerator=Accelerator.T4))
     await backend.cancel(info.id)
     assert fake.terminated == [info.id]
+
+
+# --- spot / interruptible (Phase 2c) ----------------------------------------
+
+
+class FakeGraphQL:
+    def __init__(self, pod_id: str | None = "spot-1"):
+        self.calls: list[tuple[str, dict]] = []
+        self._pod_id = pod_id
+
+    async def __call__(self, query: str, variables: dict) -> dict:
+        self.calls.append((query, variables))
+        if self._pod_id is None:
+            return {"podRentInterruptable": None}  # bid didn't clear
+        return {"podRentInterruptable": {"id": self._pod_id, "desiredStatus": "RUNNING"}}
+
+
+def test_runpod_capabilities_advertise_spot():
+    caps = RunPodBackend().capabilities
+    assert caps.supports_spot and caps.prepaid_wallet
+    assert caps.preempt_notice_seconds == 120
+
+
+async def test_runpod_spot_bids_via_graphql():
+    gql = FakeGraphQL()
+    backend = RunPodBackend(graphql=gql)
+    info = await backend.submit(
+        JobSpec(code="train()", accelerator=Accelerator.A100, spot=True, max_price_usd_hr=1.5)
+    )
+    assert info.state is JobState.RUNNING and "spot bid" in (info.detail or "")
+    _q, variables = gql.calls[0]
+    inp = variables["input"]
+    assert inp["bidPerGpu"] == 1.5  # the per-job cap becomes the bid
+    assert inp["gpuTypeId"] == "NVIDIA A100 80GB PCIe" and inp["cloudType"] == "COMMUNITY"
+    assert "python -c" in inp["dockerArgs"]
+
+
+async def test_runpod_spot_requires_a_bid():
+    backend = RunPodBackend(graphql=FakeGraphQL())
+    with pytest.raises(ConfigurationError, match="max bid"):
+        await backend.submit(JobSpec(code="x=1", accelerator=Accelerator.A100, spot=True))
+
+
+async def test_runpod_spot_uncleared_bid_is_infra_error():
+    from colabctl.errors import ColabctlError
+
+    backend = RunPodBackend(graphql=FakeGraphQL(pod_id=None))
+    with pytest.raises(ColabctlError, match="did not clear"):
+        await backend.submit(
+            JobSpec(code="x=1", accelerator=Accelerator.A100, spot=True, max_price_usd_hr=1.0)
+        )
