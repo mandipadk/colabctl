@@ -515,6 +515,8 @@ def quota(ctx: typer.Context) -> None:
                     lines.append(f"GPUs:        {', '.join(ccu.eligible_gpus)}")
                 if ccu.eligible_tpus:
                     lines.append(f"TPUs:        {', '.join(ccu.eligible_tpus)}")
+                if ccu.ineligible_gpus:
+                    lines.append(f"GPUs (n/a):  {', '.join(ccu.ineligible_gpus)}")
             if lines:
                 for line in lines:
                     typer.echo(line)

@@ -5,13 +5,14 @@ from __future__ import annotations
 from colabctl.models import Accelerator, CcuInfo
 from colabctl.spend import spend_report
 
-# The verified live ccu-info shape (canary, 2026-06-11).
+# The verified live ccu-info shape (canary, 2026-06-11; ineligibleGpus added 2026-06-25).
 _RAW = {
     "assignmentsCount": 1,
     "consumptionRateHourly": 1.96,
     "currentBalance": 100.0,
     "eligibleGpus": ["T4", "L4", "A100"],
     "eligibleTpus": ["V5E1"],
+    "ineligibleGpus": ["H100"],
 }
 
 
@@ -22,6 +23,7 @@ def test_ccu_info_parses_real_shape() -> None:
     assert ccu.consumption_rate_hourly == 1.96
     assert ccu.assignments_count == 1
     assert ccu.eligible_gpus == ["T4", "L4", "A100"]
+    assert ccu.ineligible_gpus == ["H100"]  # added by Colab 2026-06-25 (canary drift #1)
     assert round(ccu.runway_hours, 1) == 51.0  # 100 / 1.96
 
 

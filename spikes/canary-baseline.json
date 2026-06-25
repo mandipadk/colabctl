@@ -1,7 +1,7 @@
 {
   "fingerprints": {
     "assignments": "fe82e7e270e22ac8",
-    "ccu-info": "ff719838eea14d77"
+    "ccu-info": "5609d34be54783d9"
   },
   "skeletons": {
     "assignments": {
@@ -27,6 +27,9 @@
         "str"
       ],
       "eligibleTpus": [
+        "str"
+      ],
+      "ineligibleGpus": [
         "str"
       ]
     }

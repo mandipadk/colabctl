@@ -153,8 +153,9 @@ class SessionInfo(BaseModel):
 class CcuInfo(BaseModel):
     """Compute-unit standing for a Colab account (``/tun/m/ccu-info``).
 
-    Shape verified live (canary, 2026-06-11); ``extra="ignore"`` so the model tolerates
-    the undocumented endpoint adding fields without breaking. All fields are optional.
+    Shape verified live (canary, 2026-06-11; ``ineligibleGpus`` added 2026-06-25);
+    ``extra="ignore"`` so the model tolerates the undocumented endpoint adding fields without
+    breaking. All fields are optional.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -164,6 +165,9 @@ class CcuInfo(BaseModel):
     assignments_count: int | None = Field(default=None, alias="assignmentsCount")
     eligible_gpus: list[str] = Field(default_factory=list, alias="eligibleGpus")
     eligible_tpus: list[str] = Field(default_factory=list, alias="eligibleTpus")
+    #: GPUs this account is NOT entitled to (added by Colab 2026-06-25) — the complement of
+    #: ``eligible_gpus``; useful so ``colabctl quota`` can explain a refused accelerator.
+    ineligible_gpus: list[str] = Field(default_factory=list, alias="ineligibleGpus")
 
     @property
     def runway_hours(self) -> float | None:

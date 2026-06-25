@@ -50,3 +50,18 @@ def test_diff_descends_into_nested_and_lists() -> None:
 def test_no_diff_for_identical_shapes() -> None:
     skel = structural_skeleton({"a": [1], "b": {"c": "s"}})
     assert skeleton_diff(skel, skel) == []
+
+
+def test_canary_baseline_fingerprints_match_their_skeletons() -> None:
+    # Invariant: a re-baseline must recompute the fingerprint from the (verified) skeleton.
+    # Catches a hand-edited baseline whose hash got out of sync with its shape.
+    import json
+    from pathlib import Path
+
+    baseline = json.loads(
+        (Path(__file__).resolve().parent.parent / "spikes" / "canary-baseline.json").read_text()
+    )
+    for name, skeleton in baseline["skeletons"].items():
+        assert structural_fingerprint(skeleton) == baseline["fingerprints"][name], (
+            f"{name}: fingerprint is stale vs its skeleton"
+        )
