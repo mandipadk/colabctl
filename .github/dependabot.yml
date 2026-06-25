@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Python dependencies (uv reads pyproject.toml + uv.lock). One grouped PR/week keeps the
+  # noise low for a small team; security updates still open separately and promptly.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns: ["*"]
+
+  # GitHub Actions used by CI / canary / publish.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
