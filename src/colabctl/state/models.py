@@ -132,6 +132,12 @@ class StoredJob(BaseModel):
     timeout: int | None = None
     #: Whether the workload resumes idempotently from its checkpoint after a re-assign.
     resumable: bool = False
+    #: User-provided env injected into the runner (threaded to the spawned process). Holds the
+    #: caller's non-secret env only — tracking creds are RE-RESOLVED from the secret store on
+    #: each launch/resume, never persisted here.
+    env: dict[str, str] = {}
+    #: Experiment tracker ("wandb"/"mlflow") — re-applied on auto-resume.
+    track: str | None = None
 
     #: ``/content/.colabctl/jobs/<id>`` on the VM (None until launched).
     remote_dir: str | None = None

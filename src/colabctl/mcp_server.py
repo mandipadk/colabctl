@@ -331,14 +331,20 @@ class DetachedJobTools:
         requirements: list[str] | None = None,
         timeout: int | None = None,
         resumable: bool = False,
+        track: str | None = None,
     ) -> dict[str, Any]:
-        """Submit a durable detached Colab job; returns its id immediately (does not block)."""
+        """Submit a durable detached Colab job; returns its id immediately (does not block).
+
+        ``track="wandb"|"mlflow"`` enables experiment tracking (creds from the secret store; the
+        run is tagged with the job id and its URL is captured into the audit ledger).
+        """
         spec = JobSpec(
             code=code,
             accelerator=_accelerator(gpu),
             requirements=requirements or [],
             timeout=timeout,
             resumable=resumable,
+            track=track,
         )
         info = await self._b().submit(spec)
         return {

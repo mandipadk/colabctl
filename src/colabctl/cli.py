@@ -974,6 +974,12 @@ def job_run(
         help="Refuse to launch if cumulative ledger spend + this run would exceed $N "
         "(fail-closed cumulative cap)",
     ),
+    track: str | None = typer.Option(
+        None,
+        "--track",
+        help="Experiment tracking: 'wandb' or 'mlflow' (creds from the secret store; run tagged "
+        "with the job id; run URL captured into `colabctl audit`)",
+    ),
 ) -> None:
     """Run a job on a backend, wait for it, and print the result.
 
@@ -998,6 +1004,7 @@ def job_run(
         resumable=resumable,
         spot=spot,
         max_price_usd_hr=max_price,
+        track=track,
     )
 
     if detach:

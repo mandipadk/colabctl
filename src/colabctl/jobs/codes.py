@@ -79,6 +79,7 @@ def _status(state, **extra):
 def main():
     with open(META) as f:
         meta = json.load(f)
+    os.environ.update(meta.get("env") or {})  # inject job env (creds/tracking) for pip + child
     started = time.time()
     _status("running", started_at=started)
     log = open(LOG, "a", buffering=1)
@@ -150,6 +151,7 @@ def build_launch_code(
     timeout: float | None = None,
     root: str = DEFAULT_JOBS_ROOT,
     created_at: float | None = None,
+    env: dict[str, str] | None = None,
 ) -> str:
     """Code that writes the job files and spawns the runner detached; prints the pid.
 
@@ -163,6 +165,7 @@ def build_launch_code(
         "requirements": list(requirements or []),
         "timeout": timeout,
         "created_at": created_at,
+        "env": dict(env or {}),
     }
     return (
         "import os, json, subprocess, sys\n"

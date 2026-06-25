@@ -52,6 +52,9 @@ class JobSpec(BaseModel):
     #: Per-job fail-closed price ceiling — refuse to launch on any backend pricier than this
     #: ``$/hr`` (a budget *guarantee*, not a preference; OpenRouter ``max_price`` semantics).
     max_price_usd_hr: float | None = None
+    #: Experiment tracking: ``"wandb"`` or ``"mlflow"`` to inject creds (from the secret store),
+    #: enable autolog, tag the run with the job id, and capture the run URL into the audit ledger.
+    track: str | None = None
     #: Whether the workload resumes idempotently from its own checkpoint after a
     #: runtime re-assign — the opt-in that lets the lifecycle manager auto-resume a
     #: detached job on reclamation (plan Pillar 2) rather than failing it.

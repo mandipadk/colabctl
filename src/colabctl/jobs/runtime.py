@@ -78,6 +78,7 @@ class KernelJobRuntime:
         requirements: list[str] | None = None,
         timeout: float | None = None,
         created_at: float | None = None,
+        env: dict[str, str] | None = None,
     ) -> LaunchResult:
         code = build_launch_code(
             job_id,
@@ -86,6 +87,7 @@ class KernelJobRuntime:
             timeout=timeout,
             root=self._root,
             created_at=created_at,
+            env=env,
         )
         result = await self._transport.execute(session, code)
         if not result.ok:

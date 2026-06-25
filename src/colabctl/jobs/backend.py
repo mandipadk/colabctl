@@ -119,17 +119,52 @@ class DetachedColabBackend(Backend):
 
     # -- Backend contract ---------------------------------------------------
 
+    def _apply_tracking(
+        self,
+        track: str | None,
+        job_id: str,
+        *,
+        base_env: dict[str, str],
+        base_reqs: list[str],
+        code: str,
+    ) -> tuple[dict[str, str], str, list[str]]:
+        """Resolve tracking env (creds from the secret store — re-resolved per launch, never
+        persisted), wrap the script with the autolog preamble/postamble, and add the lib."""
+        env = dict(base_env or {})
+        reqs = list(base_reqs or [])
+        if track:
+            from colabctl.secrets import default_secret_store
+            from colabctl.tracking import (
+                requirements_for,
+                resolve_tracking_env,
+                tracking_postamble,
+                tracking_preamble,
+            )
+
+            env.update(resolve_tracking_env(track, job_id, secret_get=default_secret_store().get))
+            reqs += requirements_for(track)
+            code = f"{tracking_preamble(track)}\n{code}\n{tracking_postamble(track)}"
+        return env, code, reqs
+
     async def submit(self, spec: JobSpec) -> JobInfo:
         job_id = f"colab-{uuid.uuid4().hex[:10]}"
         session = await self._transport.allocate(
             RuntimeSpec(accelerator=spec.accelerator, name=spec.name)
         )
+        env, script, reqs = self._apply_tracking(
+            spec.track,
+            job_id,
+            base_env=spec.env,
+            base_reqs=list(spec.requirements),
+            code=spec.resolved_code(),
+        )
         launched = await self._runtime.launch(
             session.name,
             job_id,
-            script=spec.resolved_code(),
-            requirements=spec.requirements,
+            script=script,
+            requirements=reqs,
             timeout=spec.timeout,
+            env=env,
         )
         self._state.put_job(
             StoredJob(
@@ -142,6 +177,8 @@ class DetachedColabBackend(Backend):
                 code=spec.resolved_code(),
                 timeout=spec.timeout,
                 resumable=spec.resumable,
+                env=dict(spec.env or {}),
+                track=spec.track,
                 max_incarnations=self._max_incarnations,
                 remote_dir=launched.remote_dir,
                 pid=launched.pid,
@@ -209,12 +246,35 @@ class DetachedColabBackend(Backend):
         self._state.put_job(job)
         return data.decode(errors="replace"), new_offset
 
+    def _capture_lineage(self, job: StoredJob, text: str) -> None:
+        """Record a tracking run's id/URL (printed by the job) into the audit ledger, once."""
+        try:
+            import json as _json
+
+            from colabctl.tracking import parse_lineage
+
+            lineage = parse_lineage(text)
+            already = any(e.action == "lineage" for e in self._state.list_audit(job_id=job.id))
+            if lineage and not already:
+                self._state.record_audit(
+                    AuditEvent(
+                        action="lineage",
+                        backend=self.name,
+                        job_id=job.id,
+                        detail=_json.dumps({"track": job.track, **lineage}),
+                    )
+                )
+        except Exception:
+            pass  # lineage bookkeeping must never break result()
+
     async def result(self, job_id: str) -> JobResult:
         job = self._require(job_id)
         snapshot = await self._poll_until_terminal(job)
         state = job_state_from(snapshot)
         data, _ = await self._drain(job, offset=0)
         text = job.archived_log + data.decode(errors="replace")
+        if job.track:
+            self._capture_lineage(job, text)
         exit_code = snapshot.get("exit_code")
         error = text[-400:] if state is JobState.FAILED and text else None
         return JobResult(
@@ -390,12 +450,17 @@ class DetachedColabBackend(Backend):
                 job.max_incarnations,
             )
             session = await self._transport.allocate(RuntimeSpec(accelerator=job.accelerator))
+            # Re-apply tracking on resume (creds re-resolved from the secret store, not persisted).
+            env, script, reqs = self._apply_tracking(
+                job.track, job.id, base_env=job.env, base_reqs=job.requirements, code=job.code
+            )
             launched = await self._runtime.launch(
                 session.name,
                 job.id,
-                script=job.code,
-                requirements=job.requirements,
+                script=script,
+                requirements=reqs,
                 timeout=job.timeout,
+                env=env,
             )
         prior_state = job.state
         # Record the incarnation boundary in the stitched log so the re-assign is visible
