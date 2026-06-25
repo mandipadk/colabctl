@@ -37,4 +37,4 @@ def test_build_router_orders_by_names():
 
 
 def test_backend_names_constant():
-    assert BACKEND_NAMES == ("colab", "modal", "vertex", "hf", "kaggle", "runpod")
+    assert BACKEND_NAMES == ("colab", "modal", "vertex", "hf", "kaggle", "runpod", "vast")

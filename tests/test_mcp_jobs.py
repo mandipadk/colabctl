@@ -52,7 +52,15 @@ async def test_run_notebook_runs_as_job(tmp_path):
 async def test_list_backends():
     tools = JobTools(backend_factory=lambda name: FakeBackend(name=name, accels=["T4", "A100"]))
     out = await tools.list_backends()
-    assert {b["name"] for b in out} == {"colab", "modal", "vertex", "hf", "kaggle", "runpod"}
+    assert {b["name"] for b in out} == {
+        "colab",
+        "modal",
+        "vertex",
+        "hf",
+        "kaggle",
+        "runpod",
+        "vast",
+    }
     assert out[0]["accelerators"] == ["A100", "T4"]
 
 

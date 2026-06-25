@@ -122,7 +122,7 @@ async def test_default_catalog_static_is_offline_deterministic() -> None:
 
     cheapest = await default_catalog(live=False).cheapest(Accelerator.A100)
     assert cheapest is not None
-    assert cheapest.provider == "colab" and cheapest.source == "static"
+    assert cheapest.provider == "vast" and cheapest.source == "static"
 
 
 def test_default_catalog_live_prepends_market_feed() -> None:

@@ -20,15 +20,15 @@ async def test_catalog_cheapest_across_backends():
     cat = PriceCatalog()  # static table only
     cheapest = await cat.cheapest(Accelerator.A100)
     assert cheapest is not None
-    assert cheapest.provider == "colab"  # $1.50 effective beats modal/vertex/runpod on-demand
+    assert cheapest.provider == "vast"  # $1.10 on-demand beats colab/modal/vertex/runpod
 
 
 async def test_catalog_cheapest_spot_only():
     cat = PriceCatalog()
     cheapest = await cat.cheapest(Accelerator.A100, spot=True)
     assert cheapest is not None
-    assert cheapest.provider == "runpod"  # only runpod has a spot A100 ($1.19)
-    assert cheapest.rate(spot=True) == 1.19
+    assert cheapest.provider == "vast"  # cheapest spot A100 ($0.67, vs runpod $1.19)
+    assert cheapest.rate(spot=True) == 0.67
 
 
 async def test_catalog_cheapest_respects_backend_filter_and_cap():
@@ -84,4 +84,5 @@ def test_static_source_filters_by_accelerator():
     src = StaticPriceSource()
     rows = asyncio.run(src.prices(accelerator=Accelerator.H100))
     assert rows and all(r.accelerator is Accelerator.H100 for r in rows)
-    assert {r.provider for r in rows} == {"modal", "vertex", "runpod"}  # colab/kaggle have no H100
+    # colab/kaggle have no H100 in the table
+    assert {r.provider for r in rows} == {"modal", "vertex", "runpod", "vast"}

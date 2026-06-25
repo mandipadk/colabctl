@@ -12,10 +12,10 @@ from colabctl.transport.native.adapter import native_opt_in_enabled, require_nat
 
 
 def test_backend_names_are_expected():
-    assert BACKEND_NAMES == ("colab", "modal", "vertex", "hf", "kaggle", "runpod")
+    assert BACKEND_NAMES == ("colab", "modal", "vertex", "hf", "kaggle", "runpod", "vast")
 
 
-@pytest.mark.parametrize("name", ["modal", "vertex", "hf", "kaggle", "runpod"])
+@pytest.mark.parametrize("name", ["modal", "vertex", "hf", "kaggle", "runpod", "vast"])
 def test_build_backend_known_non_colab(name):
     # These construct cheaply (config only, no SDK import / network).
     assert build_backend(name).name == name

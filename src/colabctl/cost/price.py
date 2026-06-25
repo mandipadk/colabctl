@@ -71,6 +71,11 @@ STATIC_GPU_PRICES: list[GpuPrice] = [
     _p("runpod", Accelerator.L4, 0.43, 0.24),
     _p("runpod", Accelerator.A100, 1.89, 1.19),
     _p("runpod", Accelerator.H100, 4.18, 1.75),
+    # Vast.ai — bid marketplace; on-demand + (cheaper) spot floors
+    _p("vast", Accelerator.T4, 0.25, 0.12),
+    _p("vast", Accelerator.L4, 0.45, 0.22),
+    _p("vast", Accelerator.A100, 1.10, 0.67),
+    _p("vast", Accelerator.H100, 2.40, 1.65),
 ]
 
 
