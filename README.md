@@ -34,6 +34,10 @@ asyncio.run(main())
 
 ## Install
 
+Requires Python 3.12+. The `cli` extra bundles Google's official `google-colab-cli` (the
+default transport's driver), so a `[cli]`/`[all]` install works out of the box — nothing to
+install separately.
+
 ```bash
 pip install "colabctl[cli,sdk,native,secrets]"
 # or as a CLI tool (exposes `colabctl` and `colabctl-mcp`):
@@ -41,6 +45,9 @@ uv tool install "colabctl[cli,sdk]"
 ```
 
 Bleeding edge from source: `pip install "colabctl[all] @ git+https://github.com/mandipadk/colabctl.git"`.
+
+> Prefer no external binary? The `native` (`-t native`, opt-in) and `browser` (`-t browser`)
+> transports drive Colab directly and don't need `google-colab-cli`.
 
 Extras: `cli`, `sdk`, `native`, `secrets`, `mcp`, `drive`, `modal`, `vertex`, `hf`,
 `browser` (or `all`).

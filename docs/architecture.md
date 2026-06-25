@@ -23,8 +23,10 @@ the validation findings (including the keep-alive saga) are in
 ## Key decisions
 
 - **Sanctioned-default, no CLI lock-in.** The official `google-colab-cli` is the
-  default Colab transport, but the from-scratch native `/tun/m/*` transport is a
-  co-equal, opt-in implementation — so the product survives CLI churn.
+  default Colab transport and is **bundled** with the `cli`/`all` extras (a fresh install
+  works out of the box — no separate install); the from-scratch native `/tun/m/*` transport
+  is a co-equal, opt-in implementation needing no external binary — so the product survives
+  CLI churn and runs even where that binary can't.
 - **Two complementary abstractions.** `TransportAdapter` models *interactive* warm-GPU
   runtimes; `Backend` models *batch* jobs. Colab is exposed as both.
 - **Survivability via routing.** `BackendRouter` selects by capability and fails over
