@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-25
+
+Patch over 0.4.0.
+
+### Fixed
+
+- **Experiment tracking no longer crashes when no secret store is available.** On a headless
+  machine with no OS keyring backend, `default_secret_store().get` raised `NoKeyringError`, so a
+  tracked run (`@remote(track=…)` / `job run --track`) crashed instead of running. A
+  missing/broken secret backend now **fails open** — no credential found → run the workload
+  without tracking (W&B → `WANDB_MODE=disabled`).
+- **Tolerate Colab's new `ineligibleGpus` ccu-info field** (the daily `/tun/m/*` canary caught it
+  — a benign additive field, not a protocol break). Surfaced as `CcuInfo.ineligible_gpus` and in
+  `colabctl quota` (`GPUs (n/a):`), and the canary baseline re-fingerprinted to match.
+
 ## [0.4.0] - 2026-06-25
 
 Agent-native delivery + the production-trust layer: durable jobs that agents recognize as MCP
