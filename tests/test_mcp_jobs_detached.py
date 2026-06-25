@@ -35,6 +35,8 @@ async def _await_done(tools: DetachedJobTools, job_id: str, *, tries: int = 200)
 async def test_submit_poll_collect(tools: DetachedJobTools) -> None:
     submitted = await tools.submit_job("print('mcp detached')")
     assert submitted["state"] == "RUNNING"
+    # MCP Tasks-shaped (9.1): a durable taskId + spec status alongside the legacy fields.
+    assert submitted["taskId"] == submitted["id"] and submitted["status"] == "working"
     job_id = submitted["id"]
 
     await _await_done(tools, job_id)
@@ -42,6 +44,35 @@ async def test_submit_poll_collect(tools: DetachedJobTools) -> None:
     assert result["ok"] is True
     assert result["exit_code"] == 0
     assert "mcp detached" in result["stdout"]
+    assert result["status"] == "completed" and result["taskId"] == job_id
+
+
+def test_task_status_maps_jobstate_to_sep1686():
+    from colabctl.backends.base import JobState
+    from colabctl.mcp_server import _task_fields
+
+    assert _task_fields("j", JobState.RUNNING) == {"taskId": "j", "status": "working"}
+    assert _task_fields("j", JobState.SUCCEEDED)["status"] == "completed"
+    assert _task_fields("j", JobState.FAILED)["status"] == "failed"
+    assert _task_fields("j", JobState.CANCELLED)["status"] == "cancelled"
+
+
+async def test_coded_wrapper_enriches_errors_and_passes_success():
+    from colabctl.errors import ColabctlError, QuotaExceededError
+    from colabctl.mcp_server import _coded
+
+    async def boom() -> None:
+        raise QuotaExceededError("out of compute units")
+
+    with pytest.raises(ColabctlError) as ei:
+        await _coded(boom)()
+    msg = str(ei.value)
+    assert "code=QUOTA_EXCEEDED" in msg and "category=allocation" in msg and "remediation:" in msg
+
+    async def ok() -> dict:
+        return {"x": 1}
+
+    assert await _coded(ok)() == {"x": 1}  # success path untouched
 
 
 async def test_job_logs_offset(tools: DetachedJobTools) -> None:

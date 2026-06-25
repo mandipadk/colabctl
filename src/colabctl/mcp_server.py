@@ -14,13 +14,14 @@ Design notes:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import functools
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from colabctl.backends.base import Backend, JobSpec
+from colabctl.backends.base import Backend, JobSpec, JobState
 from colabctl.backends.factory import BACKEND_NAMES, build_backend, build_router
 from colabctl.backends.router import BackendRouter
-from colabctl.errors import ConfigurationError
+from colabctl.errors import ColabctlError, ConfigurationError
 from colabctl.models import Accelerator, ExecutionResult, SessionInfo
 from colabctl.sdk.client import ColabClient
 
@@ -32,11 +33,48 @@ SERVER_INSTRUCTIONS = (
     "Allocate once, reuse the returned session name across run_code calls, and "
     "stop_runtime when done. Runtimes are ephemeral — persist important artifacts "
     "with download_file. Prefer T4 for cheap work; A100/H100 may be unavailable. "
-    "For long-running work, prefer the detached job tools: submit_job returns a job id "
-    "immediately; then poll job_status/job_logs and collect job_result — the job "
-    "survives across calls and disconnects, so do other work between polls instead of "
-    "blocking on run_job."
+    "For long-running work, prefer the detached job tools — they follow the MCP Tasks "
+    "model: submit_job returns a taskId (= the job id) with a status "
+    "(working/completed/failed/cancelled); poll job_status until status is terminal, then "
+    "collect job_result. The job is DURABLE: it survives across calls, disconnects, and even "
+    "this server, auto-resuming from its checkpoint if the runtime is reclaimed — so do other "
+    "work between polls instead of blocking on run_job. Errors carry a stable `code`, "
+    "`category`, and a `remediation` hint."
 )
+
+#: JobState → MCP Tasks (SEP-1686) status vocabulary, so agents recognize a detached job as a
+#: durable task. We map to the spec's five values; ``input_required`` never applies to us.
+_TASK_STATUS: dict[JobState, str] = {
+    JobState.PENDING: "working",
+    JobState.RUNNING: "working",
+    JobState.SUCCEEDED: "completed",
+    JobState.FAILED: "failed",
+    JobState.CANCELLED: "cancelled",
+    JobState.UNKNOWN: "working",
+}
+
+
+def _task_fields(job_id: str, state: JobState) -> dict[str, str]:
+    """The Tasks-shaped fields (taskId + spec status) merged into detached-job responses."""
+    return {"taskId": job_id, "status": _TASK_STATUS.get(state, "working")}
+
+
+def _coded(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Wrap a tool so a raised ``ColabctlError`` carries its stable code + remediation, instead
+    of a bare human string — agents can branch on the code/category and act on the hint."""
+
+    @functools.wraps(fn)
+    async def _wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await fn(*args, **kwargs)
+        except ColabctlError as exc:
+            d = exc.to_dict()
+            msg = f"{d['message']} [code={d['code']} category={d['category']}]"
+            if d.get("remediation"):
+                msg += f" remediation: {d['remediation']}"
+            raise ColabctlError(msg) from exc
+
+    return _wrapped
 
 
 def _session_dict(info: SessionInfo) -> dict[str, Any]:
@@ -268,12 +306,22 @@ class DetachedJobTools:
             resumable=resumable,
         )
         info = await self._b().submit(spec)
-        return {"id": info.id, "state": info.state.value, "detail": info.detail}
+        return {
+            "id": info.id,
+            "state": info.state.value,
+            "detail": info.detail,
+            **_task_fields(info.id, info.state),
+        }
 
     async def job_status(self, job_id: str) -> dict[str, Any]:
-        """Current state of a detached job (PENDING/RUNNING/SUCCEEDED/FAILED/CANCELLED)."""
+        """Detached-job state, Tasks-shaped (status: working/completed/failed/cancelled)."""
         info = await self._b().status(job_id)
-        return {"id": info.id, "state": info.state.value, "detail": info.detail}
+        return {
+            "id": info.id,
+            "state": info.state.value,
+            "detail": info.detail,
+            **_task_fields(info.id, info.state),
+        }
 
     async def job_logs(self, job_id: str, offset: int = 0) -> dict[str, Any]:
         """Incremental logs from ``offset``; pass back the returned offset to continue."""
@@ -290,6 +338,7 @@ class DetachedJobTools:
             "exit_code": result.exit_code,
             "stdout": result.stdout,
             "error": result.error,
+            **_task_fields(result.id, result.state),
         }
 
     async def cancel_job(self, job_id: str) -> str:
@@ -318,25 +367,32 @@ def build_server(
     detached = DetachedJobTools(detached_backend_factory)
     server = FastMCP(server_name, instructions=SERVER_INSTRUCTIONS)
 
+    def _register(*fns: Callable[..., Awaitable[Any]]) -> None:
+        # Every tool is wrapped so a raised ColabctlError surfaces its stable code + remediation.
+        for fn in fns:
+            server.tool()(_coded(fn))
+
     # Interactive Colab session tools.
-    server.tool()(tools.allocate_runtime)
-    server.tool()(tools.run_code)
-    server.tool()(tools.list_runtimes)
-    server.tool()(tools.runtime_status)
-    server.tool()(tools.upload_file)
-    server.tool()(tools.download_file)
-    server.tool()(tools.interrupt_runtime)
-    server.tool()(tools.stop_runtime)
+    _register(
+        tools.allocate_runtime,
+        tools.run_code,
+        tools.list_runtimes,
+        tools.runtime_status,
+        tools.upload_file,
+        tools.download_file,
+        tools.interrupt_runtime,
+        tools.stop_runtime,
+    )
     # Batch-job tools across backends.
-    server.tool()(jobs.run_job)
-    server.tool()(jobs.run_notebook)
-    server.tool()(jobs.list_backends)
-    # Durable detached-job tools (submit → poll → collect).
-    server.tool()(detached.submit_job)
-    server.tool()(detached.job_status)
-    server.tool()(detached.job_logs)
-    server.tool()(detached.job_result)
-    server.tool()(detached.cancel_job)
+    _register(jobs.run_job, jobs.run_notebook, jobs.list_backends)
+    # Durable detached-job tools (submit → poll → collect; MCP Tasks-shaped).
+    _register(
+        detached.submit_job,
+        detached.job_status,
+        detached.job_logs,
+        detached.job_result,
+        detached.cancel_job,
+    )
     return server
 
 
