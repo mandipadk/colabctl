@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-25
+
+Agent-native delivery + the production-trust layer: durable jobs that agents recognize as MCP
+Tasks, coded errors, one-shot tools, an audit ledger, `colabctl doctor`, structured logging,
+and W&B/MLflow/Hydra integration. (Test suite 813 → 861.)
+
+### Added
+
+- **MCP Tasks-shaped durable jobs.** Detached-job MCP responses now carry a `taskId` (= job id)
+  and a `status` in the SEP-1686 vocabulary (`working`/`completed`/`failed`/`cancelled`), so
+  agents treat colabctl's VM-durable jobs as MCP Tasks — the durability primitive that survives
+  the agent's context *and* the server. (Tasks-shaped now; native `task=True` deferred until the
+  experimental lifecycle stabilizes.)
+- **Coded errors across the MCP/SDK boundary.** Every error carries a stable `code`, a
+  `category`, and a `remediation` hint (`to_dict()`), surfaced through the MCP tools — agents
+  branch on the code (e.g. `QUOTA_EXCEEDED` → try another backend) instead of parsing strings.
+- **One-shot agent tools** `run_once` / `run_file` — collapse allocate→run→teardown into one
+  MCP call.
+- **Append-only lifecycle+cost audit ledger** + `colabctl audit` — a chronological trail of
+  submit/auto-resume/run events with `$` + ids, the forensic record behind the durability and
+  cost-safety guarantees.
+- **`colabctl doctor`** + an MCP `health_check` tool — offline preflight checks (ADC creds, the
+  `colab` binary, configured backends, state-store health, agent skill) that answer "why won't
+  this run" before you burn time.
+- **Structured JSON logging + correlation IDs** — `configure_logging(json_logs=True)` /
+  `COLABCTL_LOG_JSON=1`, a `correlation_context` that tags every log line with `job_id`/
+  incarnation (greppable across a 12h cross-reassignment job), and a thin `set_event_sink` hook
+  for an OpenTelemetry exporter (no otel dependency).
+- **Experiment tracking — W&B + MLflow** via `@remote(track="wandb"|"mlflow")`, `job run
+  --track`, and MCP `submit_job track=`. Credentials come from the secret store and are injected
+  as env (never baked into pickled code); autolog is enabled on the runtime; the run is tagged
+  with the job id; and the run id/URL is captured into the audit ledger (two-way lineage). Creds
+  are re-resolved on auto-resume — never persisted in state.
+- **`colabctl-hydra-launcher`** (separate distribution) — `hydra/launcher=colab` runs each
+  Hydra `--multirun` job as a durable detached colabctl job, fanning a sweep across runtimes.
+
+### Changed
+
+- `JobSpec.env` is now threaded into the detached runner (previously ignored) — a general fix
+  that also carries the tracking env. `StoredJob` persists the user env + tracker name (never
+  credentials).
+
 ## [0.3.7] - 2026-06-25
 
 Phase 2c finale (the spot tier) + an Agent Skill so AI agents can discover and drive colabctl.

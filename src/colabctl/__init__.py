@@ -37,7 +37,7 @@ from colabctl.models import (
 from colabctl.notebook import notebook_to_script, run_notebook, run_notebook_job
 from colabctl.sdk import ColabClient, ColabSession, remote
 
-__version__ = "0.3.7"
+__version__ = "0.4.0"
 
 __all__ = [
     "Accelerator",
