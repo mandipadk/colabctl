@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import cloudpickle
 import pytest
@@ -96,6 +97,36 @@ async def test_remote_decorator_reraises_remote_exception():
 
     with pytest.raises(RuntimeError, match="gpu oom"):
         await f.aio()
+
+
+def test_harness_splices_preamble_and_postamble():
+    harness = build_remote_harness(
+        "UEFZTE9BRA==", preamble="import wandb as _w  # pre", postamble="print('post')"
+    )
+    compile(harness, "harness", "exec")
+    # preamble runs before the user fn; postamble after it, before the result frame
+    assert harness.index("import wandb as _w") < harness.index("_fn(*_args")
+    assert harness.index("_fn(*_args") < harness.index("print('post')")
+    assert harness.index("print('post')") < harness.index(RESULT_BEGIN)
+
+
+async def test_remote_track_records_lineage_to_audit():
+    from colabctl.state import StateStore
+    from colabctl.tracking import LINEAGE_BEGIN, LINEAGE_END
+
+    value = base64.b64encode(cloudpickle.dumps(42)).decode()
+    lineage = json.dumps({"wandb_run_id": "r1", "wandb_run_url": "https://wandb.ai/e/p/runs/r1"})
+    text = f"{LINEAGE_BEGIN}{lineage}{LINEAGE_END}\n{RESULT_BEGIN}ok|{value}{RESULT_END}"
+    client = ColabClient(transport=FakeTransport(execute_text=text))
+
+    @remote(client=client, track="wandb")
+    def f() -> int:
+        return 1
+
+    assert await f.aio() == 42  # the result still decodes
+    lineage_events = [e for e in StateStore().list_audit() if e.action == "lineage"]
+    assert lineage_events and "wandb_run_id" in (lineage_events[0].detail or "")
+    assert '"track": "wandb"' in (lineage_events[0].detail or "")
 
 
 async def test_remote_decorator_orchestration_returns_decoded_value():

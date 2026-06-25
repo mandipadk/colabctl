@@ -25,6 +25,7 @@ import asyncio
 import base64
 import functools
 import json
+import uuid
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast
 
@@ -66,6 +67,8 @@ def build_remote_harness(
     requirements: list[str] | None = None,
     env: dict[str, str] | None = None,
     cloudpickle_version: str | None = None,
+    preamble: str = "",
+    postamble: str = "",
 ) -> str:
     """Build the VM-side code that unpickles, runs, and re-pickles the result.
 
@@ -94,6 +97,8 @@ def build_remote_harness(
         lines.append(
             f"subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', *{reqs}], check=True)"
         )
+    if preamble:  # e.g. experiment-tracking init/autolog, run BEFORE the user fn
+        lines.append(preamble.rstrip("\n"))
     lines += [
         f"_payload = base64.b64decode({json.dumps(payload_b64)})",
         "_fn, _args, _kwargs = _cp.loads(_payload)",
@@ -109,6 +114,10 @@ def build_remote_harness(
         "    except Exception:",  # an unpicklable exception → ship the traceback only
         "        _blob = _cp.dumps({'exc': None, 'tb': _tbmod.format_exc()})",
         "    _status = 'err'",
+    ]
+    if postamble:  # e.g. capture the tracking run id/URL, run AFTER the user fn (even on error)
+        lines.append(postamble.rstrip("\n"))
+    lines += [
         "_enc = base64.b64encode(_blob).decode()",
         f"print({json.dumps(RESULT_BEGIN)} + _status + '|' + _enc + {json.dumps(RESULT_END)})",
     ]
@@ -160,6 +169,25 @@ def decode_result(text: str) -> Any:
 # --- orchestration ----------------------------------------------------------
 
 
+def _record_remote_lineage(job_id: str, track: str, text: str) -> None:
+    """Capture a tracking run's id/URL from the run output into the audit ledger (best-effort)."""
+    try:
+        import json as _json
+
+        from colabctl.state import AuditEvent, StateStore
+        from colabctl.tracking import parse_lineage
+
+        lineage = parse_lineage(text or "")
+        if lineage:
+            StateStore().record_audit(
+                AuditEvent(
+                    action="lineage", job_id=job_id, detail=_json.dumps({"track": track, **lineage})
+                )
+            )
+    except Exception:
+        pass  # lineage bookkeeping must never break a finished remote run
+
+
 async def _run_remote(
     fn: Callable[..., Any],
     args: tuple[Any, ...],
@@ -172,20 +200,47 @@ async def _run_remote(
     timeout: float | None,
     requirements: list[str] | None = None,
     env: dict[str, str] | None = None,
+    track: str | None = None,
+    project: str | None = None,
+    entity: str | None = None,
 ) -> Any:
     own_client = client is None
     cl = client or ColabClient(transport_name=transport)
     cp_version = getattr(_load_cloudpickle(), "__version__", None)
+    reqs = list(requirements or [])
+    run_env = dict(env or {})
+    preamble = postamble = ""
+    job_id = f"remote-{uuid.uuid4().hex[:10]}"
+    if track:
+        from colabctl.secrets import default_secret_store
+        from colabctl.tracking import (
+            requirements_for,
+            resolve_tracking_env,
+            tracking_postamble,
+            tracking_preamble,
+        )
+
+        run_env.update(
+            resolve_tracking_env(
+                track, job_id, secret_get=default_secret_store().get, project=project, entity=entity
+            )
+        )
+        reqs += requirements_for(track)
+        preamble, postamble = tracking_preamble(track), tracking_postamble(track)
     try:
         session = await cl.allocate(gpu=gpu, keep=keep)
         async with session:
             harness = build_remote_harness(
                 encode_call(fn, args, kwargs),
-                requirements=requirements,
-                env=env,
+                requirements=reqs or None,
+                env=run_env or None,
                 cloudpickle_version=cp_version,
+                preamble=preamble,
+                postamble=postamble,
             )
             result = await session.run(harness, timeout=timeout)
+            if track:
+                _record_remote_lineage(job_id, track, result.text)
             if not result.ok:
                 err = result.error
                 raise ExecutionError(
@@ -211,6 +266,9 @@ def remote(
     timeout: float | None = None,
     requirements: list[str] | None = None,
     env: dict[str, str] | None = None,
+    track: str | None = None,
+    project: str | None = None,
+    entity: str | None = None,
 ) -> Any:
     """Decorator: run the wrapped function on a Colab GPU.
 
@@ -218,6 +276,11 @@ def remote(
     ``requirements`` are pip-installed and ``env`` injected on the runtime before the call;
     cloudpickle is pinned to the host's version to avoid the by-value-pickle skew. The
     returned callable runs synchronously by default; call ``.aio(...)`` for the awaitable form.
+
+    ``track="wandb"`` or ``"mlflow"`` turns on experiment tracking: creds are pulled from the
+    secret store and injected as env (never baked into code), the library is installed +
+    autolog enabled on the runtime, the run is tagged with a job id, and the run id/URL is
+    captured into the audit ledger (``colabctl audit``). ``project``/``entity`` set W&B's.
     """
 
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
@@ -235,6 +298,9 @@ def remote(
                     timeout=timeout,
                     requirements=requirements,
                     env=env,
+                    track=track,
+                    project=project,
+                    entity=entity,
                 ),
             )
 
