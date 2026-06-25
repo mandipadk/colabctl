@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-06-24
+
+Cost-aware arbitrage engine (Phase 2a + 2b + first 2c) — route to the cheapest qualifying
+backend under hard, fail-closed budget caps — plus a critical out-of-box install fix.
+
+### Added
+
+- **Cheapest-first cost routing.** A backend-neutral price model (`colabctl.cost`: `GpuPrice`
+  rows, a `PriceSource` chain, a `PriceCatalog` facade) over a hand-maintained static table.
+  `job run --cheapest --allow colab,modal,runpod` orders candidates by `$/hr` and composes
+  with the existing capability/failover routing.
+- **Fail-closed budget caps** (OpenRouter `max_price` semantics — a guarantee, not a
+  preference): `--max-price` (per-job `$/hr` ceiling) and `--budget` (cumulative USD cap read
+  from the persisted ledger, so a restart/auto-resume can't reset spend and slip past it). If
+  nothing qualifies, it **refuses to launch** — never silently picks a pricier backend.
+- **Cross-backend USD spend ledger** + `colabctl spend`; each cost-routed run records an
+  estimated `SpendRecord`, so spend is auditable and the cumulative cap has live data.
+- **`colabctl cost [--gpu A100] [--spot] [--live]`** — dry-run price estimator, cheapest-first.
+  `--live` overlays a cached, plausibility-guarded **ComputePrices** market feed (the static
+  table stays the deterministic, offline-safe routing floor and the fallback).
+- **`colabctl spot-risk`** — per-accelerator spot interruption-rate + savings from AWS's free
+  Spot Advisor feed (directional reference; H100 <5% … T4 >20%).
+- **RunPod spot tier** — `--spot` bids via the GraphQL `podRentInterruptable` path (the SDK
+  has no bid param) with a fail-closed max bid; advertises `supports_spot`/`prepaid_wallet`/
+  `preempt_notice_seconds`.
+
+### Fixed
+
+- **`colabctl[all]` now works out of the box.** The default `cli` transport drives Google's
+  `colab` binary, but colabctl never shipped it — a fresh `uv tool install "colabctl[all]"`
+  couldn't run until you *separately* installed google-colab-cli. Now `google-colab-cli` is
+  bundled in the `cli`/`all` extras, and the transport resolves `colab` from colabctl's own
+  environment (uv-tool installs a dependency's script into the venv but not onto PATH). A
+  genuinely missing binary now yields an actionable error pointing at the fix + the binary-free
+  `-t native`/`-t browser` transports.
+
+### Changed
+
+- **Requires Python 3.12+** (google-colab-cli's floor). Live price feeds degrade
+  cached → static so a feed outage never breaks routing; aggregator unit-error rows (e.g. a
+  per-minute price mislabeled hourly) are dropped by per-accelerator plausibility floors.
+
 ## [0.3.5] - 2026-06-24
 
 Durability + credibility release. A native **headless keep-alive** that actually works, the
