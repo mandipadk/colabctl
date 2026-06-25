@@ -146,6 +146,17 @@ Tools include `allocate_runtime`, `run_code`, `interrupt_runtime`, and the submi
 job set (`submit_job`, `job_status`, `job_logs`, `job_result`, `cancel_job`) so an agent
 launches long work and does other things while it runs.
 
+**From an AI agent (Agent Skill)** — for Claude Code, also install the bundled Agent Skill so
+the agent *discovers* colabctl and knows which commands/examples to use (complements the MCP
+server — it's the know-how layer):
+
+```bash
+colabctl skill install           # copies the skill into ~/.claude/skills/colabctl/
+```
+
+It ships inside the wheel; the skill teaches the command map + recipes and routes the agent to
+the MCP tools when connected, else the CLI. (`colabctl skill status` / `--project` / `--force`.)
+
 ## Backends
 
 One job API (`submit / status / logs / result / cancel`) with capability-based routing

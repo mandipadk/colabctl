@@ -30,6 +30,9 @@ def _isolate_colabctl_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     state hermetic across tests (each test gets its own empty store).
     """
     monkeypatch.setenv("COLABCTL_HOME", str(tmp_path / "colabctl-home"))
+    # The first-run Agent-Skill hint writes to stderr; keep it out of CLI test output
+    # (tests that parse command output for ids would otherwise capture the hint line).
+    monkeypatch.setenv("COLABCTL_NO_SKILL_HINT", "1")
 
 
 @pytest.fixture(autouse=True)

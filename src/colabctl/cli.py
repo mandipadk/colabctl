@@ -63,6 +63,34 @@ def _root(
     colab_bin: str = typer.Option("colab", "--colab-bin", help="Path to the `colab` executable"),
 ) -> None:
     ctx.obj = _State(transport=transport, auth=auth, colab_bin=colab_bin)
+    _maybe_skill_hint()
+
+
+def _maybe_skill_hint() -> None:
+    """Once per colabctl version, suggest installing the Agent Skill (never write silently)."""
+    import os
+
+    if os.environ.get("COLABCTL_NO_SKILL_HINT"):
+        return
+    try:
+        from colabctl import skills
+        from colabctl.state import default_home
+
+        if not skills.needs_hint():
+            return
+        marker = default_home() / f".skill-hint-{__version__}"
+        if marker.exists():
+            return
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        typer.secho(
+            "tip: run `colabctl skill install` so AI agents (Claude Code) can discover "
+            "colabctl's commands. Silence with COLABCTL_NO_SKILL_HINT=1.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+    except Exception:
+        pass  # a hint must never break a command
 
 
 def _make_client(state: _State) -> ColabClient:
@@ -140,6 +168,63 @@ def _finish_run(result: ExecutionResult, printer: _StreamPrinter) -> None:
 def version() -> None:
     """Print the colabctl version."""
     typer.echo(f"colabctl {__version__}")
+
+
+skill_app = typer.Typer(
+    name="skill",
+    help="Install the colabctl Agent Skill so AI agents (Claude Code) can discover its commands.",
+    no_args_is_help=True,
+)
+app.add_typer(skill_app, name="skill")
+
+
+@skill_app.command("install")
+def skill_install(
+    scope: str = typer.Option("user", "--scope", help="'user' (~/.claude/skills) or 'project'"),
+    project: bool = typer.Option(False, "--project", help="Shortcut for --scope project"),
+    force: bool = typer.Option(False, "--force", help="Re-copy even if already up to date"),
+) -> None:
+    """Copy the bundled colabctl Agent Skill into a Claude Code skills directory."""
+    from colabctl import skills
+
+    sc = "project" if project else scope
+    try:
+        res = skills.install(sc, force=force)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
+    if res.action == "current":
+        typer.echo(f"colabctl skill already up to date at {res.path} (use --force to re-copy)")
+        return
+    typer.echo(f"{res.action} colabctl skill at {res.path}")
+    typer.echo("Open a new Claude Code session to pick it up; the agent can then use colabctl.")
+
+
+@skill_app.command("status")
+def skill_status() -> None:
+    """Show where the colabctl skill is installed and its version."""
+    from colabctl import skills
+
+    for sc in ("user", "project"):
+        version = skills.installed_version(sc)
+        label = f"v{version}" if version else "not installed"
+        typer.echo(f"{sc:<8} {skills.target_dir(sc)}  ->  {label}")
+    typer.echo(f"bundled  v{__version__}")
+
+
+@skill_app.command("uninstall")
+def skill_uninstall(
+    scope: str = typer.Option("user", "--scope", help="'user' or 'project'"),
+    project: bool = typer.Option(False, "--project", help="Shortcut for --scope project"),
+) -> None:
+    """Remove the installed colabctl skill."""
+    from colabctl import skills
+
+    sc = "project" if project else scope
+    if skills.uninstall(sc):
+        typer.echo(f"removed colabctl skill from {skills.target_dir(sc)}")
+    else:
+        typer.echo(f"no colabctl skill installed at {skills.target_dir(sc)}")
 
 
 @app.command()
