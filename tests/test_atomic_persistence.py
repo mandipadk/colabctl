@@ -55,6 +55,29 @@ def test_filelock_acquire_release(tmp_path):
         pass
 
 
+def test_filelock_blocks_across_processes(tmp_path):
+    # The Windows-safety value: the lock is held against a *separate process*, not just no-op'd.
+    import subprocess
+    import sys
+
+    from filelock import Timeout
+
+    lock = tmp_path / "x.lock"
+    child = (
+        "import time; from filelock import FileLock; "
+        f"_l = FileLock({str(lock)!r}); _l.acquire(); print('held', flush=True); time.sleep(10)"
+    )
+    proc = subprocess.Popen([sys.executable, "-c", child], stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "held"  # the child now holds the lock
+        with pytest.raises(Timeout):  # we cannot acquire it while the child holds it
+            with FileLock(lock, timeout=0.4):
+                pass
+    finally:
+        proc.terminate()
+        proc.wait()
+
+
 def _store(tmp_path):
     return EncryptedFileSecretStore(path=tmp_path / "secrets.enc", passphrase="pw")
 

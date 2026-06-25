@@ -26,6 +26,9 @@ classifiers = [
 dependencies = [
     "pydantic>=2.7",
     "httpx>=0.27",
+    # Cross-platform advisory file locking for the durable state + secret stores (Windows-safe;
+    # zero transitive deps). Matches google-colab-cli's lock choice.
+    "filelock>=3.12",
 ]
 
 [project.optional-dependencies]

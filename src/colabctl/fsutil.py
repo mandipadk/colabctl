@@ -8,7 +8,7 @@ cycle, and both need the same two guarantees:
   ``os.replace``'d into place, so a reader (or a crash mid-write) never sees a half-written
   file. The destination is left ``0600`` and its parent directory ``0700``.
 * **Cross-process safe** — a read-modify-write is wrapped in an exclusive advisory lock
-  (POSIX ``flock``), released automatically if the holder dies.
+  (the cross-platform ``filelock`` package), released automatically if the holder dies.
 
 Keeping these in one place means the crash-safety and concurrency guarantees are written
 and tested once, not re-derived (and subtly broken) per store.
@@ -22,34 +22,32 @@ import tempfile
 from pathlib import Path
 from types import TracebackType
 
-try:  # POSIX advisory locking (macOS + Linux — the stated deploy targets).
-    import fcntl
-
-    _HAVE_FCNTL = True
-except ImportError:  # pragma: no cover - non-POSIX fallback
-    _HAVE_FCNTL = False
+from filelock import FileLock as _PortableLock
 
 
 class FileLock:
-    """A POSIX ``flock`` advisory lock scoped to a ``with`` block.
+    """A cross-platform exclusive advisory lock scoped to a ``with`` block.
 
-    Degrades to a no-op where ``fcntl`` is unavailable; the atomic ``os.replace`` in
-    :func:`atomic_write` still guarantees readers never see a torn file, so the worst
-    case without real locking is a last-writer-wins race between two concurrent writers
-    — acceptable for a single user's tooling, and not a concern on the supported
-    platforms. (Windows support via ``filelock`` is a separate, planned change.)
+    Backed by the ``filelock`` package, so it works on Windows too — unlike the old POSIX
+    ``flock`` version, which silently no-op'd off-POSIX and made cross-process state (the
+    state store + encrypted secret store) unsafe there. Released automatically on exit or if
+    the holder process dies.
+
+    ``exclusive`` is kept for API compatibility and to signal read-vs-write intent, but
+    ``filelock`` always acquires an *exclusive* lock; the POSIX version's shared-read mode is
+    dropped (reads are rare and fast for single-user tooling, and serializing a read against a
+    concurrent write is the correct behaviour). ``timeout`` (seconds; ``-1`` = block forever)
+    bounds the wait — a positive value raises ``filelock.Timeout`` if the lock is still held.
     """
 
-    def __init__(self, path: Path, *, exclusive: bool = True) -> None:
+    def __init__(self, path: Path, *, exclusive: bool = True, timeout: float = -1.0) -> None:
         self._path = path
         self._exclusive = exclusive
-        self._fd: int | None = None
+        self._lock = _PortableLock(str(path), timeout=timeout)
 
     def __enter__(self) -> FileLock:
         self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._fd = os.open(self._path, os.O_CREAT | os.O_RDWR, 0o600)
-        if _HAVE_FCNTL:
-            fcntl.flock(self._fd, fcntl.LOCK_EX if self._exclusive else fcntl.LOCK_SH)
+        self._lock.acquire()
         return self
 
     def __exit__(
@@ -58,13 +56,7 @@ class FileLock:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        if self._fd is not None:
-            try:
-                if _HAVE_FCNTL:
-                    fcntl.flock(self._fd, fcntl.LOCK_UN)
-            finally:
-                os.close(self._fd)
-                self._fd = None
+        self._lock.release()
 
 
 def atomic_write(path: Path, data: str, *, mode: int = 0o600) -> None:
