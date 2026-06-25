@@ -1,14 +1,61 @@
 site_name: colabctl
-site_description: Programmatic control of Google Colab for developers and AI agents.
+site_description: Durable, cost-aware, agent-native control of Google Colab + other GPU backends.
 repo_url: https://github.com/mandipadk/colabctl
+repo_name: mandipadk/colabctl
+edit_uri: edit/main/docs/
+
 theme:
-  name: readthedocs
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: { icon: material/weather-night, name: Dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: { icon: material/weather-sunny, name: Light mode }
+
+plugins:
+  - search
+  # Worked examples are executed at build time, so a stale snippet fails the docs CI job.
+  - markdown-exec
+  # Auto-generated API reference from the package's own docstrings + type hints.
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            heading_level: 3
+            members_order: source
+            separate_signature: true
+            docstring_style: google
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+  - tables
+  - toc: { permalink: true }
+
 nav:
   - Home: index.md
+  - Examples: examples.md
   - Backends: backends.md
-  - Deployment: deployment.md
   - Architecture: architecture.md
-  - Plan (1x → 10x): plan.md
+  - API reference: api.md
+  - Deployment: deployment.md
 
-# Build with: uvx mkdocs serve   (or: uvx mkdocs build)
-# Uses a built-in theme, so no extra dependency is required.
+# Strategy/roadmap docs are dev-facing, not for the public site (plan-100x.md is also gitignored).
+exclude_docs: |
+  plan*.md
+
+# Build with: uvx --with-requirements <docs deps> mkdocs build  (or: uv run --group docs mkdocs serve)

@@ -1,0 +1,28 @@
+name: docs
+
+# Build the docs on every PR/push (a strict build EXECUTES the examples, so a broken snippet or
+# dead link fails CI — that is Phase 5.11.3's "CI-tested examples"). Deploy to GitHub Pages only
+# on a push to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write # mkdocs gh-deploy pushes the built site to the gh-pages branch
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Build docs (strict — runs the examples, fails on a broken one)
+        run: uv run --group docs mkdocs build --strict
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: uv run --group docs mkdocs gh-deploy --force --no-history

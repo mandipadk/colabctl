@@ -78,10 +78,15 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+    "markdown-exec>=1.8",
+]
 
 [project.urls]
 Homepage = "https://github.com/mandipadk/colabctl"
-Documentation = "https://github.com/mandipadk/colabctl/tree/main/docs"
+Documentation = "https://mandipadk.github.io/colabctl/"
 
 [tool.hatch.version]
 # Single source of truth: __version__ in the package __init__.
