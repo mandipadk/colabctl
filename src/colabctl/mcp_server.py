@@ -125,6 +125,29 @@ class ColabTools:
         result = await self._client.attach(session).run(code, timeout=timeout)
         return _result_dict(result)
 
+    async def run_once(
+        self, code: str, gpu: str = "T4", timeout: float | None = None
+    ) -> dict[str, Any]:
+        """Allocate a runtime, run ``code``, and tear it down — one call, no session to manage.
+
+        Collapses the allocate_runtime → run_code → stop_runtime dance for quick one-shot work.
+        For long-running work prefer ``submit_job`` (durable, survives disconnects); for several
+        runs on one GPU, ``allocate_runtime`` once and reuse ``run_code``.
+        """
+        session = await self._client.allocate(gpu=gpu, keep=False)
+        try:
+            return _result_dict(await session.run(code, timeout=timeout))
+        finally:
+            await session.stop()  # always release the one-shot runtime
+
+    async def run_file(
+        self, path: str, gpu: str = "T4", timeout: float | None = None
+    ) -> dict[str, Any]:
+        """Run a local ``.py`` file one-shot on a fresh runtime, then tear it down."""
+        from pathlib import Path
+
+        return await self.run_once(Path(path).read_text(), gpu=gpu, timeout=timeout)
+
     async def list_runtimes(self) -> list[dict[str, Any]]:
         """List active runtimes."""
         return [_session_dict(info) for info in await self._client.list_sessions()]
@@ -372,10 +395,12 @@ def build_server(
         for fn in fns:
             server.tool()(_coded(fn))
 
-    # Interactive Colab session tools.
+    # Interactive Colab session tools (+ one-shot allocate→run→teardown tools).
     _register(
         tools.allocate_runtime,
         tools.run_code,
+        tools.run_once,
+        tools.run_file,
         tools.list_runtimes,
         tools.runtime_status,
         tools.upload_file,

@@ -40,6 +40,26 @@ async def test_run_code_returns_result_dict():
     assert t.executed == [("j", "print('hello')")]
 
 
+async def test_run_once_allocates_runs_and_tears_down():
+    tools, t = _tools()
+    out = await tools.run_once("print('one-shot')", gpu="T4")
+    assert out["ok"] is True and out["status"] == "ok"
+    assert "ran:" in out["stdout"]
+    # exactly one runtime was used and it was released (the one-shot dance, no leak)
+    assert len(t.executed) == 1
+    assert t.executed[0][0] in t.stopped
+
+
+async def test_run_file_reads_local_file_and_runs_once(tmp_path):
+    tools, t = _tools()
+    script = tmp_path / "script.py"
+    script.write_text("print('from file')")
+    out = await tools.run_file(str(script), gpu="T4")
+    assert out["ok"] is True
+    assert t.executed[0][1] == "print('from file')"  # the file's code ran
+    assert t.executed[0][0] in t.stopped  # and was torn down
+
+
 async def test_list_and_status():
     tools, _ = _tools()
     await tools.allocate_runtime(name="a")
