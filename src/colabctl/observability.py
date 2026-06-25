@@ -11,10 +11,15 @@ only waste time and money on.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import datetime
+import json as _json
 import logging
+import os
 import random
-from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager, suppress
+from typing import Any, TypeVar
 
 from colabctl.errors import (
     AcceleratorUnavailableError,
@@ -36,14 +41,106 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"{_ROOT_LOGGER_NAME}.{name}")
 
 
-def configure_logging(level: int | str = logging.INFO, *, stream: bool = True) -> None:
-    """Opt-in logging setup for apps/CLI. Idempotent."""
+# --- correlation IDs (Phase 4.10.2) -----------------------------------------
+# A context-local bag of ids (job_id/session_id/backend/trace_id) attached to every log line
+# emitted while it's bound — so the operational log of a 12h cross-reassignment job is
+# greppable by job_id end to end.
+
+_correlation: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "colabctl_correlation", default=None
+)
+
+
+@contextmanager
+def correlation_context(**fields: str | None) -> Iterator[None]:
+    """Bind correlation ids onto every colabctl log line emitted within the ``with`` block."""
+    merged = {**(_correlation.get() or {}), **{k: v for k, v in fields.items() if v is not None}}
+    token = _correlation.set(merged)
+    try:
+        yield
+    finally:
+        _correlation.reset(token)
+
+
+class _CorrelationFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlation = _correlation.get() or {}
+        return True
+
+
+# --- structured (JSON) logging + an optional event sink (Phase 4.10.4) ------
+
+#: An optional sink for structured log events (e.g. an OpenTelemetry exporter). colabctl takes
+#: NO otel dependency — you set a callable that adapts the event dict. See :func:`set_event_sink`.
+_event_sink: Callable[[dict[str, Any]], None] | None = None
+
+
+def set_event_sink(sink: Callable[[dict[str, Any]], None] | None) -> None:
+    """Forward every structured log event to ``sink`` (a thin hook; pass None to disable).
+
+    The event dict carries ts/level/logger/message + any bound correlation ids — adapt it to
+    an OTel span/log or any backend. This is a hook, not a tracing subsystem.
+    """
+    global _event_sink
+    _event_sink = sink
+
+
+def _record_payload(record: logging.LogRecord) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ts": datetime.datetime.fromtimestamp(record.created, tz=datetime.UTC).isoformat(),
+        "level": record.levelname,
+        "logger": record.name,
+        "message": record.getMessage(),
+    }
+    corr = getattr(record, "correlation", None)
+    if corr:
+        payload.update(corr)
+    if record.exc_info:
+        payload["exc"] = logging.Formatter().formatException(record.exc_info)
+    return payload
+
+
+class JsonFormatter(logging.Formatter):
+    """One JSON object per log line: ts/level/logger/message + bound correlation ids."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return _json.dumps(_record_payload(record))
+
+
+class _EventSinkHandler(logging.Handler):
+    """Forwards each record's structured payload to the configured event sink (if any)."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if _event_sink is not None:
+            with suppress(Exception):  # a sink must never break logging
+                _event_sink(_record_payload(record))
+
+
+def configure_logging(
+    level: int | str = logging.INFO, *, stream: bool = True, json_logs: bool | None = None
+) -> None:
+    """Opt-in logging setup for apps/CLI. Idempotent.
+
+    ``json_logs`` (or ``COLABCTL_LOG_JSON=1``) emits one JSON object per line with bound
+    correlation ids; otherwise a human line. A structured event-sink handler is always attached
+    (it no-ops until :func:`set_event_sink` is called).
+    """
     logger = logging.getLogger(_ROOT_LOGGER_NAME)
     logger.setLevel(level)
+    use_json = json_logs if json_logs is not None else bool(os.environ.get("COLABCTL_LOG_JSON"))
     if stream and not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        handler: logging.Handler = logging.StreamHandler()
+        handler.addFilter(_CorrelationFilter())
+        handler.setFormatter(
+            JsonFormatter()
+            if use_json
+            else logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
         logger.addHandler(handler)
+    if not any(isinstance(h, _EventSinkHandler) for h in logger.handlers):
+        sink_handler = _EventSinkHandler()
+        sink_handler.addFilter(_CorrelationFilter())
+        logger.addHandler(sink_handler)
 
 
 #: Errors that are terminal — retrying them wastes time/money, so never retry.

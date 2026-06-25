@@ -34,7 +34,7 @@ from colabctl.errors import AllocationError, ColabctlError, JobError, RuntimeUna
 from colabctl.jobs.codes import DEFAULT_JOBS_ROOT
 from colabctl.jobs.runtime import KernelJobRuntime, job_state_from
 from colabctl.models import RuntimeSpec
-from colabctl.observability import get_logger
+from colabctl.observability import correlation_context, get_logger
 from colabctl.state import AuditEvent, JobEvent, StateStore, StoredJob, utcnow
 from colabctl.transport.base import TransportAdapter
 
@@ -379,20 +379,24 @@ class DetachedColabBackend(Backend):
             job.state = JobState.FAILED
             self._state.put_job(job)
             raise
-        _log.warning(
-            "job %s: runtime reclaimed, re-assigning (incarnation %d/%d)",
-            job.id,
-            job.incarnations + 1,
-            job.max_incarnations,
-        )
-        session = await self._transport.allocate(RuntimeSpec(accelerator=job.accelerator))
-        launched = await self._runtime.launch(
-            session.name,
-            job.id,
-            script=job.code,
-            requirements=job.requirements,
-            timeout=job.timeout,
-        )
+        # Bind the job's correlation ids so every log line during the reclaim→re-allocate
+        # (transport, retry/backoff) is attributable to this job + incarnation, not just the
+        # one line that names it — the 12h cross-reassignment debugging case.
+        with correlation_context(job_id=job.id, incarnation=str(job.incarnations + 1)):
+            _log.warning(
+                "job %s: runtime reclaimed, re-assigning (incarnation %d/%d)",
+                job.id,
+                job.incarnations + 1,
+                job.max_incarnations,
+            )
+            session = await self._transport.allocate(RuntimeSpec(accelerator=job.accelerator))
+            launched = await self._runtime.launch(
+                session.name,
+                job.id,
+                script=job.code,
+                requirements=job.requirements,
+                timeout=job.timeout,
+            )
         prior_state = job.state
         # Record the incarnation boundary in the stitched log so the re-assign is visible
         # and the prior runtime's logs aren't silently replaced by a fresh-from-zero view.
