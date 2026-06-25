@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from colabctl.state.models import (
     SCHEMA_VERSION,
+    AuditEvent,
     JobEvent,
     RecordState,
     SpendRecord,
@@ -26,6 +27,7 @@ from colabctl.state.store import StateStore, default_home
 
 __all__ = [
     "SCHEMA_VERSION",
+    "AuditEvent",
     "JobEvent",
     "RecordState",
     "SpendRecord",

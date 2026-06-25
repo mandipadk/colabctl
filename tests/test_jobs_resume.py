@@ -124,6 +124,9 @@ async def test_resumable_job_auto_resumes_on_reclaim(store: StateStore, tmp_path
         e.reason == "runtime reclaimed; re-assigned" and e.incarnation == 2 for e in record.events
     )
     assert record.events[-1].to_state is JobState.SUCCEEDED
+    # The global audit ledger records the lifecycle: submit (inc 1) + resume (inc 2).
+    actions = [(e.action, e.incarnation) for e in store.list_audit(job_id=info.id)]
+    assert ("submit", 1) in actions and ("resume", 2) in actions
 
 
 async def test_resume_stitches_log_with_incarnation_marker(

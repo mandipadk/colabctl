@@ -34,6 +34,7 @@ from colabctl.fsutil import atomic_write as _atomic_write
 from colabctl.observability import get_logger
 from colabctl.state.models import (
     SCHEMA_VERSION,
+    AuditEvent,
     SpendRecord,
     StateDocument,
     StoredJob,
@@ -145,6 +146,24 @@ class StateStore:
 
     def total_spend_usd(self, *, since: datetime | None = None) -> float:
         return sum(r.est_cost_usd for r in self.load().spend if since is None or r.at >= since)
+
+    # -- audit ledger (lifecycle + cost; Phase 4 evidence layer) -------------
+
+    def record_audit(self, event: AuditEvent) -> None:
+        with self.transaction() as doc:
+            doc.audit.append(event)
+
+    def list_audit(
+        self, *, job_id: str | None = None, since: datetime | None = None
+    ) -> list[AuditEvent]:
+        return [
+            e
+            for e in self.load().audit
+            if (job_id is None or e.job_id == job_id) and (since is None or e.at >= since)
+        ]
+
+    def audit_cost_usd(self, *, job_id: str | None = None, since: datetime | None = None) -> float:
+        return sum(e.cost_usd or 0.0 for e in self.list_audit(job_id=job_id, since=since))
 
     # -- internals ----------------------------------------------------------
 

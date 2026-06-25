@@ -35,7 +35,7 @@ from colabctl.jobs.codes import DEFAULT_JOBS_ROOT
 from colabctl.jobs.runtime import KernelJobRuntime, job_state_from
 from colabctl.models import RuntimeSpec
 from colabctl.observability import get_logger
-from colabctl.state import JobEvent, StateStore, StoredJob, utcnow
+from colabctl.state import AuditEvent, JobEvent, StateStore, StoredJob, utcnow
 from colabctl.transport.base import TransportAdapter
 
 _log = get_logger("jobs.backend")
@@ -153,6 +153,17 @@ class DetachedColabBackend(Backend):
                         reason="submitted",
                     )
                 ],
+            )
+        )
+        self._state.record_audit(
+            AuditEvent(
+                action="submit",
+                backend=self.name,
+                accelerator=spec.accelerator,
+                job_id=job_id,
+                session_id=session.name,
+                incarnation=1,
+                detail="detached job submitted" + (" (resumable)" if spec.resumable else ""),
             )
         )
         return JobInfo(
@@ -404,6 +415,17 @@ class DetachedColabBackend(Backend):
         )
         job.state = JobState.RUNNING
         self._state.put_job(job)
+        self._state.record_audit(
+            AuditEvent(
+                action="resume",
+                backend=self.name,
+                accelerator=job.accelerator,
+                job_id=job.id,
+                session_id=session.name,
+                incarnation=job.incarnations,
+                detail="runtime reclaimed; auto-resumed from checkpoint",
+            )
+        )
 
     async def _drain(self, job: StoredJob, *, offset: int) -> tuple[bytes, int]:
         """Read the log from ``offset`` to EOF, returning the bytes and the end offset."""

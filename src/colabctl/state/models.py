@@ -171,17 +171,39 @@ class SpendRecord(BaseModel):
     note: str | None = None
 
 
+class AuditEvent(BaseModel):
+    """One append-only entry in the lifecycle+cost audit ledger (Phase 4 evidence layer).
+
+    A single chronological trail of operationally significant actions — a job submitted, a
+    runtime reclaimed and resumed, a run's realized cost, a spend-guard override — each tagged
+    with backend/accelerator/$/ids, so the durability and cost-safety guarantees are auditable
+    after the fact. This is the *operational* record; :class:`SpendRecord` is the financial one.
+    """
+
+    at: datetime = Field(default_factory=utcnow)
+    action: str  # "submit" | "resume" | "run" | "teardown" | "override" | ...
+    backend: str | None = None
+    accelerator: Accelerator = Accelerator.NONE
+    cost_usd: float | None = None
+    job_id: str | None = None
+    session_id: str | None = None
+    incarnation: int | None = None
+    detail: str | None = None
+
+
 class StateDocument(BaseModel):
-    """The root of ``state.json``: a schema version plus the session/job/spend indexes."""
+    """The root of ``state.json``: a schema version + the session/job/spend/audit indexes."""
 
     schema_version: int = SCHEMA_VERSION
     sessions: dict[str, StoredSession] = Field(default_factory=dict)
     jobs: dict[str, StoredJob] = Field(default_factory=dict)
     spend: list[SpendRecord] = Field(default_factory=list)
+    audit: list[AuditEvent] = Field(default_factory=list)
 
 
 __all__ = [
     "SCHEMA_VERSION",
+    "AuditEvent",
     "RecordState",
     "SpendRecord",
     "StateDocument",

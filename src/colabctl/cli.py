@@ -284,6 +284,35 @@ def spend(
         typer.echo(f"  {ts}  {r.backend:<8} {r.accelerator.value:<5} ${r.est_cost_usd:>6.2f}")
 
 
+@app.command()
+def audit(
+    job: str | None = typer.Option(None, "--job", help="Only events for this job id"),
+    days: int | None = typer.Option(None, "--days", help="Only events in the last N days"),
+    limit: int = typer.Option(30, "--limit", help="Max events to show (most recent)"),
+) -> None:
+    """Show the append-only lifecycle+cost audit ledger (submit/resume/run/...)."""
+    from datetime import timedelta
+
+    from colabctl.state import StateStore, utcnow
+
+    store = StateStore()
+    since = (utcnow() - timedelta(days=days)) if days else None
+    events = store.list_audit(job_id=job, since=since)
+    cost = store.audit_cost_usd(job_id=job, since=since)
+    scope = f" job={job}" if job else ""
+    window = f" last {days}d" if days else ""
+    typer.echo(f"audit{scope}{window}: {len(events)} event(s), ${cost:.2f} recorded cost")
+    for e in events[-limit:]:
+        ts = e.at.strftime("%Y-%m-%d %H:%M:%S")
+        inc = f" inc{e.incarnation}" if e.incarnation is not None else ""
+        money = f" ${e.cost_usd:.2f}" if e.cost_usd is not None else ""
+        who = e.job_id or e.session_id or ""
+        typer.echo(
+            f"  {ts}  {e.action:<9}{inc} {(e.backend or ''):<8} {who}{money}"
+            + (f"  — {e.detail}" if e.detail else "")
+        )
+
+
 @app.command(name="spot-risk")
 def spot_risk(
     gpu: str | None = typer.Option(None, "--gpu", help="One accelerator (default: all)"),
@@ -854,15 +883,26 @@ async def _record_run_spend(
     """
     try:
         from colabctl.cost import PriceCatalog
-        from colabctl.state import SpendRecord, StateStore
+        from colabctl.state import AuditEvent, SpendRecord, StateStore
 
         price = await PriceCatalog().cheapest(accelerator, spot=spot, backends=[result.backend])
         if price is None:
             return
         est = price.rate(spot=spot) * max(hours, 1.0 / 3600.0)
-        StateStore().record_spend(
+        store = StateStore()
+        store.record_spend(
             SpendRecord(
                 backend=result.backend, accelerator=accelerator, est_cost_usd=est, hours=hours
+            )
+        )
+        store.record_audit(
+            AuditEvent(
+                action="run",
+                backend=result.backend,
+                accelerator=accelerator,
+                cost_usd=est,
+                job_id=result.id,
+                detail=result.state.value,
             )
         )
     except Exception:
