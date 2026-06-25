@@ -313,6 +313,21 @@ def audit(
         )
 
 
+@app.command()
+def doctor() -> None:
+    """Preflight health checks — auth, the colab binary, backends, state, the agent skill."""
+    from colabctl.doctor import overall_status, run_checks
+
+    colors = {"ok": typer.colors.GREEN, "warn": typer.colors.YELLOW, "fail": typer.colors.RED}
+    checks = run_checks()
+    for c in checks:
+        typer.secho(f"  [{c.status:^4}] {c.name:<13} {c.detail}", fg=colors.get(c.status))
+    worst = overall_status(checks)
+    typer.secho(f"doctor: {worst}", fg=colors.get(worst))
+    if worst == "fail":
+        raise typer.Exit(1)
+
+
 @app.command(name="spot-risk")
 def spot_risk(
     gpu: str | None = typer.Option(None, "--gpu", help="One accelerator (default: all)"),

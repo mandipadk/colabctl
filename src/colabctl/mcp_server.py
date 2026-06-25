@@ -59,6 +59,18 @@ def _task_fields(job_id: str, state: JobState) -> dict[str, str]:
     return {"taskId": job_id, "status": _TASK_STATUS.get(state, "working")}
 
 
+async def health_check() -> dict[str, Any]:
+    """colabctl preflight health (auth, colab binary, backends, state, agent skill).
+
+    Call this when a runtime/job won't start to find out why (e.g. missing credentials or the
+    google-colab-cli binary) before retrying. Each check has a status (ok/warn/fail) + a fix.
+    """
+    from colabctl.doctor import overall_status, run_checks
+
+    checks = run_checks()
+    return {"status": overall_status(checks), "checks": [c.to_dict() for c in checks]}
+
+
 def _coded(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
     """Wrap a tool so a raised ``ColabctlError`` carries its stable code + remediation, instead
     of a bare human string — agents can branch on the code/category and act on the hint."""
@@ -410,6 +422,8 @@ def build_server(
     )
     # Batch-job tools across backends.
     _register(jobs.run_job, jobs.run_notebook, jobs.list_backends)
+    # Preflight health (why won't a runtime/job start).
+    _register(health_check)
     # Durable detached-job tools (submit → poll → collect; MCP Tasks-shaped).
     _register(
         detached.submit_job,
