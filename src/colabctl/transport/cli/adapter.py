@@ -10,6 +10,8 @@ structured-output path lives in the native transport.
 from __future__ import annotations
 
 import asyncio
+import shutil
+import sys
 import uuid
 from pathlib import Path
 
@@ -214,6 +216,22 @@ class ColabCliTransport(TransportAdapter):
                 parser.PINNED_CLI_VERSION,
             )
 
+    def _resolve_bin(self) -> str:
+        """Resolve the ``colab`` executable: PATH first, then colabctl's own environment.
+
+        The env fallback matters for ``uv tool``/pipx installs: a google-colab-cli co-installed
+        into colabctl's venv (e.g. ``uv tool install --with google-colab-cli "colabctl[all]"``)
+        lands its ``colab`` script in that venv's ``bin`` but NOT on the user's PATH, so a bare
+        name would not be found. We look next to ``sys.executable`` to bridge that gap.
+        """
+        on_path = shutil.which(self._bin)
+        if on_path is not None:
+            return on_path
+        sibling = Path(sys.executable).parent / self._bin
+        if sibling.exists():
+            return str(sibling)
+        return self._bin  # not found anywhere → the subprocess raises → friendly CLIError below
+
     async def _run(
         self,
         args: list[str],
@@ -223,7 +241,7 @@ class ColabCliTransport(TransportAdapter):
     ) -> tuple[int, str, str]:
         if args and args[0] != "version":
             await self._ensure_probed()
-        argv = [self._bin, *self._global_args(), *args]
+        argv = [self._resolve_bin(), *self._global_args(), *args]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
@@ -233,8 +251,13 @@ class ColabCliTransport(TransportAdapter):
             )
         except FileNotFoundError as exc:
             raise CLIError(
-                f"`{self._bin}` not found on PATH. Install it with "
-                "`uv tool install --python 3.13 google-colab-cli`.",
+                f"`{self._bin}` (google-colab-cli) isn't installed — the default `cli` "
+                "transport drives Colab through it, and colabctl does not bundle it (it needs "
+                "Python >= 3.12; colabctl supports 3.11+). Either install it alongside colabctl:\n"
+                '    uv tool install --with google-colab-cli "colabctl[all]"\n'
+                "or use a transport that needs no external binary:\n"
+                "    colabctl -t browser ...                          # logged-in Colab tab\n"
+                "    COLABCTL_ENABLE_NATIVE=1 colabctl -t native ...   # direct API (opt-in)",
                 argv=argv,
             ) from exc
 
