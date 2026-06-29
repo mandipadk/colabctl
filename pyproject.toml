@@ -97,6 +97,12 @@ packages = ["src/colabctl"]
 # Ship the PEP 561 marker so downstream type-checkers see colabctl as typed.
 artifacts = ["src/colabctl/py.typed"]
 
+[tool.hatch.build.targets.sdist]
+# The wheel is src-only, but the sdist defaults to everything not VCS-ignored. Keep the internal
+# R&D spikes (reconnaissance notes + Colab's public web key) and CI workflows out of the PyPI
+# source archive (the .hypothesis cache is gitignored). src/, tests/, docs/ + metadata still ship.
+exclude = ["spikes/", ".github/"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

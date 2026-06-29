@@ -9,12 +9,15 @@ __pycache__/
 /build/
 # mkdocs output
 /site/
+# local build/dist inspection scratch (hatchling's sdist would otherwise sweep these in)
+/scratchpad_*/
 
 # Tooling caches
 .venv/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.hypothesis/
 .coverage
 htmlcov/
 

@@ -54,7 +54,7 @@ nav:
   - API reference: api.md
   - Deployment: deployment.md
 
-# Strategy/roadmap docs are dev-facing, not for the public site (plan-100x.md is also gitignored).
+# Strategy/roadmap docs are dev-facing, not for the public site.
 exclude_docs: |
   plan*.md
 

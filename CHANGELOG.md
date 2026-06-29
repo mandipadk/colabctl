@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-29
+
+Distribution & polish (Phase 5): cross-platform locking, a real docs site, and project
+governance. The 100x roadmap is now fully implemented.
+
+### Added
+
+- **Real documentation site** — Material for MkDocs with an API reference auto-generated from the
+  package's own docstrings + type hints (`mkdocstrings`). Worked **examples are executed when the
+  docs build** (`markdown-exec`), so a stale snippet fails CI. Auto-deploys to GitHub Pages on
+  push to `main`.
+- **Project governance** — `SECURITY.md` (private vulnerability reporting + the secret-handling
+  guarantees a report is measured against), `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), and
+  Dependabot (weekly grouped Python + GitHub Actions updates).
+
+### Changed
+
+- **Cross-platform (Windows-safe) file locking.** The durable state store and encrypted secret
+  store now guard their read-modify-write with the cross-platform `filelock` package instead of
+  POSIX `fcntl.flock`, which **silently no-op'd off-POSIX** — making concurrent `colabctl`
+  invocations on Windows a last-writer-wins corruption risk. `filelock` (zero transitive deps) is
+  now a core dependency. The `FileLock` API is unchanged; it gains a `timeout` and always locks
+  exclusively (the POSIX shared-read mode is dropped — reads are rare and fast for single-user
+  tooling).
+
 ## [0.4.1] - 2026-06-25
 
 Patch over 0.4.0.
