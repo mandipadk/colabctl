@@ -10,7 +10,7 @@ e.g. ``QuotaExceededError`` should trigger failover to another backend, while a
 Every error also carries a **stable machine-readable code**, a **category**, and an optional
 **remediation** hint, surfaced via :meth:`ColabctlError.to_dict` across the MCP/SDK boundary so
 an agent can react programmatically (retry, fail over, re-auth, raise the budget) rather than
-parse a human string (Phase 3.9.2).
+parse a human string.
 """
 
 from __future__ import annotations
@@ -196,7 +196,7 @@ class RuntimeUnavailableError(TransportError):
 
 
 class KeepAliveError(TransportError):
-    """Keep-alive failed (e.g. the ADC serviceusage 403 documented in Phase 0)."""
+    """Keep-alive failed, such as an ADC service-usage rejection."""
 
     code = "KEEPALIVE"
     category = "runtime"

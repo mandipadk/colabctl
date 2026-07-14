@@ -1,4 +1,4 @@
-"""Price model + catalog: cheapest-first lookup, spot rates, fallback (Phase 2a)."""
+"""Test price catalogs, cheapest-first lookup, spot rates, and fallbacks."""
 
 from __future__ import annotations
 

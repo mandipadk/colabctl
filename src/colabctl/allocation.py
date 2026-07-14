@@ -12,8 +12,8 @@ This module centralises the bound so it is written and tested once:
 * **exponential backoff** between attempts (so even within the cap a flap can't hammer
   the allocator), with the sleep injected so it is deterministic in tests.
 
-The cross-backend dollar **budget** (plan Phase 2) will hang off the same gate; today it
-only enforces the cap + backoff, which is the safety-critical subset.
+The cross-backend dollar budget uses the same gate. This module enforces the allocation cap
+and backoff policy.
 """
 
 from __future__ import annotations

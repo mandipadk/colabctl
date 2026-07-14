@@ -1,13 +1,11 @@
 # Examples
 
-The Python snippets below are **executed when these docs are built** (via `markdown-exec`), so
-they can't silently rot — a broken example fails the docs CI job. The shell flows that need a
-live Colab account are shown as plain blocks.
+The Python snippets marked for execution run during the documentation build. Shell examples that
+need a provider account remain plain code blocks.
 
-## Compare GPU cost across backends
+## Compare catalog prices
 
-`colabctl.cost` ranks backends by `$/hr` from a built-in table (the live feed is opt-in). No
-account or network needed:
+`PriceCatalog` returns the known hourly rates without allocating a runtime:
 
 ```python exec="true" source="material-block" result="text"
 import asyncio
@@ -15,14 +13,14 @@ from colabctl.cost import PriceCatalog
 from colabctl.models import Accelerator
 
 rows = asyncio.run(PriceCatalog().per_backend(Accelerator.A100))
-for r in rows:
-    print(f"{r.provider:<8} ${r.rate():>5.2f}/hr   (spot ${r.rate(spot=True):.2f})")
+for row in rows:
+    print(f"{row.provider:<8} ${row.rate():>5.2f}/hr   (spot ${row.rate(spot=True):.2f})")
 ```
 
-## Build a cost-capped, spot-preferring job spec
+Catalog data supports comparison and admission filtering. It does not include every provider
+charge or guarantee the final invoice.
 
-`JobSpec` carries the cost guards the router enforces — a per-job `$/hr` ceiling and the spot
-tier — both fail-closed:
+## Build a price-filtered job specification
 
 ```python exec="true" source="material-block" result="text"
 from colabctl.backends.base import JobSpec
@@ -31,53 +29,76 @@ from colabctl.models import Accelerator
 spec = JobSpec(
     code="train()",
     accelerator=Accelerator.A100,
-    max_price_usd_hr=2.0,   # refuse any backend pricier than $2/hr
-    spot=True,              # prefer the interruptible tier
+    max_price_usd_hr=2.0,
+    spot=True,
+    timeout=3600,
 )
-print(f"{spec.accelerator.value}  cap=${spec.max_price_usd_hr}/hr  spot={spec.spot}")
+print(f"{spec.accelerator.value}  catalog ceiling=${spec.max_price_usd_hr}/hr  spot={spec.spot}")
 ```
 
-## Per-accelerator spot interruption risk
+The router excludes catalog rows above `max_price_usd_hr`. Spot instances can be interrupted,
+and the provider's billed total can include charges outside that hourly row.
+
+## Resolve tracking settings without a stored secret
 
 ```python exec="true" source="material-block" result="text"
 from colabctl.tracking import resolve_tracking_env
 
-# Experiment tracking is pure env-injection — creds come from the secret store, never code.
-env = resolve_tracking_env("wandb", "demo-job", secret_get=lambda _a: None)  # no key -> fail-open
-print(sorted(env))  # the job is tagged + W&B disabled when no key is present
+env = resolve_tracking_env("wandb", "demo-job", secret_get=lambda _alias: None)
+print(sorted(env))
 ```
 
-## Durable, auto-resuming GPU job (CLI)
+When no W&B credential is available, colabctl disables W&B for the job instead of placing a
+secret in the job specification.
 
-Needs a Colab account. The job runs as a supervised process on the runtime and **auto-resumes
-from its checkpoint** if the runtime is reclaimed — poll it from any shell:
+## Run a detached Colab process
 
 ```bash
-ID=$(colabctl job run train.py --backend colab --gpu A100 --detach --resumable)
-colabctl job status "$ID"          # cross-process; safe to close your laptop
-colabctl job logs "$ID" --follow   # stitched across auto-resume incarnations
-colabctl job result "$ID"
+export COLABCTL_ENABLE_NATIVE=1
+JOB_ID=$(colabctl --transport native job run train.py --detach --gpu T4)
+colabctl --transport native job status "$JOB_ID"
+colabctl --transport native job logs "$JOB_ID" --follow
+colabctl --transport native job result "$JOB_ID"
 ```
 
-## Cost-routed run with a hard budget + cross-backend failover
+The process survives the submitting shell and connection while its runtime remains available.
+
+Add `--resumable` only when `train.py` writes a checkpoint to external storage and loads it at
+startup. A later `status` or `result` call can then detect runtime loss and relaunch the stored
+workload. Recovery is poll-triggered, and logs that existed only on the reclaimed runtime may be
+incomplete.
+
+## Route an idempotent job
 
 ```bash
-colabctl job run train.py --gpu A100 \
-  --allow colab,modal,runpod,vast --cheapest --budget 10 --track wandb
-# routes to the cheapest qualifying backend, refuses to launch above $10 (fail-closed),
-# fails over on infra/preemption errors, and records the W&B run URL in `colabctl audit`.
+colabctl job run train.py \
+  --backend colab \
+  --allow colab,modal,runpod,vast \
+  --cheapest \
+  --max-price 2.50 \
+  --budget 10 \
+  --timeout 3600 \
+  --track wandb
 ```
 
-## Ship a local function to a GPU (`@remote`)
+`--cheapest` orders candidates by the catalog rate. `--max-price` filters that rate, and
+`--budget` checks the projected run against the local estimated-spend ledger. Fallback re-runs
+the workload after a typed infrastructure error, so this flow requires idempotent code and
+durable outputs.
+
+## Ship a function with `@remote`
 
 ```python
 from colabctl.sdk import remote
 
 @remote(gpu="A100", requirements=["torch"], track="wandb")
 def train(epochs: int) -> float:
-    import torch  # runs on the Colab runtime, not locally
-    ...
-    return best_accuracy
+    import torch
+    # Training runs on the remote runtime.
+    return float(torch.cuda.is_available() and epochs)
 
-acc = train(epochs=10)   # blocks; or `await train.aio(...)` inside an event loop
+accuracy = train(epochs=10)
 ```
+
+The synchronous call blocks until the remote result returns. Use `await train.aio(...)` inside an
+asyncio application.

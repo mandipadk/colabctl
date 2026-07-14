@@ -75,7 +75,7 @@ async def test_runpod_cancel_terminates(monkeypatch):
     assert fake.terminated == [info.id]
 
 
-# --- spot / interruptible (Phase 2c) ----------------------------------------
+# --- spot / interruptible ---------------------------------------------------
 
 
 class FakeGraphQL:

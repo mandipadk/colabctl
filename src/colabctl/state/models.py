@@ -116,7 +116,7 @@ class StoredJob(BaseModel):
     The runtime-side source of truth lives under ``remote_dir`` on the VM
     (``status.json``/``exit_code``/``log.txt``); this record is the client-side
     index that lets ``job logs --follow``/``job result`` resume from any process.
-    Fleshed out fully in Pillar 2; defined here so the store can hold it from day one.
+    The store keeps the client-side lifecycle record from the first submission onward.
     """
 
     id: str
@@ -162,7 +162,7 @@ class StoredJob(BaseModel):
 
 
 class SpendRecord(BaseModel):
-    """One append-only entry in the cross-backend USD spend ledger (Phase 2 cost engine).
+    """One append-only entry in the cross-backend USD spend ledger.
 
     Records the *estimated* cost of an allocation/job so cumulative spend can be capped and
     reported across heterogeneous backends (free Colab/Kaggle = ``0.0``). Estimates come from
@@ -178,7 +178,7 @@ class SpendRecord(BaseModel):
 
 
 class AuditEvent(BaseModel):
-    """One append-only entry in the lifecycle+cost audit ledger (Phase 4 evidence layer).
+    """One append-only entry in the lifecycle and cost audit ledger.
 
     A single chronological trail of operationally significant actions — a job submitted, a
     runtime reclaimed and resumed, a run's realized cost, a spend-guard override — each tagged

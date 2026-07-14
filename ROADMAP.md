@@ -1,75 +1,90 @@
-# Status & Roadmap
+# Roadmap
 
-colabctl is **alpha**. This is the honest, detailed status behind the README's one-liner.
-The current execution plan and per-phase status is [`docs/plan.md`](./docs/plan.md);
-binding decisions are in [`DIRECTIVES.md`](./DIRECTIVES.md);
-live findings are in [`spikes/PHASE0-FINDINGS.md`](./spikes/PHASE0-FINDINGS.md) and
-[`spikes/PHASE-A-FINDINGS.md`](./spikes/PHASE-A-FINDINGS.md).
+colabctl is in active development. This roadmap records the public support level of each major
+surface, the limitations users should plan around, and the maintenance work currently under
+consideration.
 
-## Live-validation matrix
+## Available now
 
-| Component | Status |
-|---|---|
-| Colab **CLI** transport (sanctioned default) | ✅ live-validated on real Colab Pro |
-| Colab **native** `/tun/m/*` transport (opt-in) | ✅ live-validated (allocate + kernel exec + transfer + teardown) |
-| **Durable sessions** — state store, cross-process attach, `gc` | ✅ offline + live (attach via GET-only refresh verified) |
-| **Detached jobs** — kernel-as-control-plane, follow, auto-resume | ✅ offline (real-subprocess lifecycle); substrate live via canary |
-| **File transfer** — contents API, chunked upload + ranged download | ✅ live-validated (multi-chunk round-trip, byte-perfect) |
-| **Runtime-direct Drive checkpoints** | ✅ live-validated (5 MiB runtime→Drive→runtime, SHA-256 match) |
-| Colab **browser** transport — ColabMCP, sanctioned, keep-alive | ✅ protocol live-captured + built; `-t browser` wired |
-| **Modal** backend | ✅ live-validated (CPU + T4) |
-| **Vertex AI** backend | ⏳ implemented + unit-tested; live-validation pending a GCP project/bucket |
-| **Hugging Face Jobs** backend | ⏳ implemented + unit-tested; live-validation pending an HF token |
+- Interactive Colab allocation and execution through Google's official CLI.
+- An opt-in custom Colab transport with streaming Jupyter execution, cross-process attach,
+  keep-alive, interrupt, file transfer, and runtime reconciliation.
+- A browser transport that works through a logged-in Colab tab.
+- Python SDK, CLI, MCP server, notebook execution, and `@remote`.
+- A common batch-job interface for Colab, Modal, Vertex AI, Hugging Face Jobs, Kaggle, RunPod,
+  and Vast.ai.
+- Capability filtering, opt-in backend fallback, catalog-price ordering, spot selection, local
+  spend estimates, and an audit ledger.
+- Detached Colab processes, job history, log following, cancellation, garbage collection, and
+  bounded poll-triggered relaunch for resumable jobs.
+- ADC authentication helpers, encrypted or keychain-backed secrets, health checks, and package
+  self-update.
 
-Tests are offline and need no credentials; live checks live in [`spikes/`](./spikes) and
-are run by hand (plus a weekly drift/health **canary**, `spikes/canary.py`).
+## Colab transports
 
-## Phases (vs. SPEC §16)
+| Transport | Default | Evidence | Current limitations |
+|---|---:|---|---|
+| Official CLI (`cli`) | Yes | Checked against Colab Pro | Depends on the installed official CLI output contract; some custom features are unavailable |
+| Custom (`native`) | No | Allocation, execution, transfer, keep-alive, attach, and teardown checked live | Requires `COLABCTL_ENABLE_NATIVE=1`; provider protocol changes can require an update |
+| Browser (`browser`) | No | Colab MCP protocol captured and covered by tests | Needs a logged-in browser tab; allocation and teardown support are limited |
 
-- **Phase 0 — Validation** ✅ — spikes confirmed the sanctioned path works; surfaced the
-  keep-alive limitation (no token-auth keep-alive RPC → kernel-activity + checkpoint/re-assign).
-- **Phase 1 — Core foundation** ✅ — secret store, auth, domain models, provider-abstraction
-  contract, CLI, MCP.
-- **Phase 2 — Colab first-class** ✅ — CLI adapter (golden-tested, version-probed), native
-  transport (streaming execution, proxy-token expiry handling), Drive sync, lifecycle
-  manager, browser-bridge.
-- **Phase 3 — Alt-backends + escape hatch** ✅ — Modal, Vertex, opt-in-gated native escape
-  hatch with contract tests, capability routing + failover.
-- **Phase 4 — Hardening, breadth, release** — observability, spend guards, CI, packaging,
-  docs ✅; **HF Jobs** ✅; **remaining:** Kaggle, RunPod/vast, a papermill adapter, a
-  `jupyter_http_over_ws` integration rig, and per-backend ToS/deploy guides.
-- **Phase 5 — Durable Colab fabric (the 1x→10x increment)** ✅ — persistent state store +
-  native attach/`gc`; **detached jobs** (the kernel as a control plane) with `--follow` +
-  auto-resume on reclamation; **real-size transfer** (contents API) + **runtime-direct Drive
-  checkpoints**; non-disruptive proxy-token refresh; auth UX (`colabctl auth login/status`),
-  `quota` + spend guard, allocation ladder, `gc`-on-412; a scheduled drift **canary**; and
-  the sanctioned **browser transport** on Colab's ColabMCP protocol. Both the native
-  (tunnel-ping) and browser (cell-activity) transports now have a working keep-alive. Full
-  detail and per-phase status: [`docs/plan.md`](./docs/plan.md).
-- **Remaining:** Track B keep-alive (cookie/SAPISIDHASH — now optional; the browser transport
-  covers keep-alive), a live ≥90-min idle measurement, Vertex/HF live validation,
-  Kaggle/RunPod, and chunked client-side `DriveSync`.
+## Batch backends
+
+| Backend | Implementation status | Live evidence | Main limitation |
+|---|---|---|---|
+| Colab | Implemented and tested | Official and custom transports checked live | Dynamic capacity and usage limits |
+| Modal | Implemented and tested | CPU and T4 runs checked live | Provider account required; state is process-local in the current adapter |
+| Vertex AI | Implemented and tested | Pending | Logs remain in Cloud Logging; project and staging bucket required |
+| Hugging Face Jobs | Implemented and tested | Pending | Provider token required |
+| Kaggle | Implemented and tested | Pending | T4 only, no cancel API, best-effort final logs |
+| RunPod | Implemented and tested | Pending | Adapter does not retain stdout; outputs need durable storage |
+| Vast.ai | Implemented and tested | Pending | Host offers, reliability, and prices vary |
+
+“Tested” means the hermetic suite exercises the adapter with fake or captured provider
+responses. “Checked live” means a bounded run succeeded on a real account. Live checks are not
+part of CI because CI never uses credentials, network access, or paid compute.
 
 ## Known limitations
 
-- **Keep-alive:** the native transport now has a working **headless token-auth keep-alive** —
-  the tunnel ping (`/tun/m/<endpoint>/keep-alive/?authuser=0` + `X-Colab-Tunnel: Google`),
-  live-validated to hold a runtime 100+ min past idle with zero activity. The legacy
-  RuntimeService RPC stays unusable under token auth. Colab's hard 12/24h cap still applies,
-  so durable long jobs rely on checkpoint/re-assign + **auto-resume** regardless.
-- **Drive checkpoints:** ADC user credentials need a quota project with the Drive API enabled
-  (`colabctl auth status` flags it; auto-detected once `set-quota-project` is run).
-- **Browser transport** is non-headless (needs a logged-in tab) and cannot terminate the VM
-  (close the tab to release it).
-- **Vertex** stdout goes to Cloud Logging (not captured); `result` returns state + a log link.
+- Detached Colab jobs survive the submitting process and connection loss while their runtime
+  remains alive. Runtime-loss recovery starts when a later `status` or `result` call observes
+  the loss.
+- `--resumable` relaunches the stored workload. The workload must save a checkpoint outside the
+  runtime and load that checkpoint when it starts again.
+- Logs stored only on a reclaimed runtime may be incomplete after relaunch.
+- A local state file provides cross-process attach and audit history. It does not provide a
+  shared or highly available controller.
+- Price ordering, `--max-price`, and `--budget` use catalog data and the local estimated-spend
+  ledger. Provider invoices, storage, egress, delayed billing, and concurrent external usage can
+  differ.
+- Backend semantics vary. Some providers do not expose streaming logs, cancellation, exit codes,
+  or durable artifacts through their current APIs.
+- The browser transport needs an authenticated tab and cannot provide the same headless
+  lifecycle controls as the CLI or custom transports.
 
-## Develop
+## Work under consideration
+
+The next public changes will be selected from these maintenance areas after their behavior and
+compatibility are reviewed:
+
+- stronger detached-job checkpoint, log, artifact, and cleanup integrity;
+- recovery that does not depend on a later client poll;
+- one conformance suite for backend failure, cancellation, timeout, and result semantics;
+- machine-readable health, status, and error output;
+- stricter official CLI compatibility checks;
+- repeated live validation with dated evidence for every advertised backend.
+
+The list does not set a release schedule. Each item needs an issue or pull request with
+acceptance criteria before implementation begins.
+
+## Development
 
 ```bash
 uv sync --all-extras
-uv run pytest            # offline, no credentials
-uv run ruff check src tests && uv run ruff format --check src tests
-uv run mypy src          # strict
+uv run --all-extras pytest -q
+uv run --all-extras mypy src
+uv run ruff check src tests
+uv run ruff format --check src tests
 ```
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for conventions.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution workflow.

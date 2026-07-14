@@ -1,4 +1,4 @@
-"""The CLI `job run --allow` path actually invokes the failover router (Phase 0.3).
+"""Test that the CLI ``job run --allow`` path invokes the failover router.
 
 Before this, ``build_router`` had zero non-test callers and the documented "a Colab
 outage degrades to Modal/Vertex" never executed in any user path. These tests assert the

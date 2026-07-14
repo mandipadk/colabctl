@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-colabctl is pre-1.0 and ships frequently; only the **latest released minor** gets security
-fixes. Please upgrade (`colabctl update`) before reporting.
+colabctl ships frequently; only the **latest released minor** gets security fixes. Please
+upgrade with `colabctl update` before reporting.
 
 | Version | Supported |
 | --- | --- |
-| 0.4.x   | ✅ |
-| < 0.4   | ❌ |
+| 0.5.x   | ✅ |
+| < 0.5   | ❌ |
 
 ## Reporting a vulnerability
 
@@ -26,7 +26,7 @@ colabctl handles credentials and drives remote runtimes, so the security-relevan
 
 - credential handling — the OS-keychain / encrypted-file secret store, environment injection, and
   proxy-token caching;
-- the reverse-engineered native `/tun/m/*` transport and the detached-job runner;
+- the custom native `/tun/m/*` transport and the detached-job runner;
 - code/argument marshalling for `@remote` and detached jobs (cloudpickle by value).
 
 **Out of scope** (report upstream): Google Colab itself, third-party backends (Modal, Vertex,

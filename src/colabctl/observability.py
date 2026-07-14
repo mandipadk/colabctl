@@ -41,7 +41,7 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"{_ROOT_LOGGER_NAME}.{name}")
 
 
-# --- correlation IDs (Phase 4.10.2) -----------------------------------------
+# --- correlation IDs --------------------------------------------------------
 # A context-local bag of ids (job_id/session_id/backend/trace_id) attached to every log line
 # emitted while it's bound — so the operational log of a 12h cross-reassignment job is
 # greppable by job_id end to end.
@@ -68,7 +68,7 @@ class _CorrelationFilter(logging.Filter):
         return True
 
 
-# --- structured (JSON) logging + an optional event sink (Phase 4.10.4) ------
+# --- structured (JSON) logging + an optional event sink ---------------------
 
 #: An optional sink for structured log events (e.g. an OpenTelemetry exporter). colabctl takes
 #: NO otel dependency — you set a callable that adapts the event dict. See :func:`set_event_sink`.

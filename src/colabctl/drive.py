@@ -1,7 +1,7 @@
 """Durable file sync via the Google Drive API (user-OAuth).
 
-Per Phase 0 §5 / the risk register: durable artifacts go to the human's **My Drive**
-via **user-OAuth** (the ADC ``drive.file`` scope), never a service account (which
+Durable artifacts go to the user's **My Drive** through user OAuth (the ADC ``drive.file``
+scope), not a service account (which
 can't own Google-native files). Files live under a single app folder; ``put`` upserts
 by name. This is the durable layer the lifecycle manager checkpoints/restores through.
 
@@ -224,7 +224,7 @@ def drive_checkpoint_hooks(
     return checkpoint, restore
 
 
-# --- runtime-direct checkpoints (Pillar 3b) ---------------------------------
+# --- runtime-direct checkpoints ---------------------------------------------
 
 
 class DriveCheckpointer:

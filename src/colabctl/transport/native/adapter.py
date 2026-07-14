@@ -1,17 +1,17 @@
-"""``NativeColabTransport`` — the from-scratch, opt-in Colab transport.
+"""``NativeColabTransport``: the custom, opt-in Colab transport.
 
 Composes the verified ``/tun/m/*`` :class:`ColabBackendClient` with a Jupyter kernel to
 implement the full :class:`TransportAdapter` contract: allocate a runtime, run code
 (typed Jupyter outputs), transfer files, and tear down. Disabled by default per the
-sanctioned-default ToS posture; this is the co-primary that ensures no CLI lock-in.
+sanctioned-default provider-compatibility posture and offers an alternative to the CLI.
 
-**Durable across processes (Pillar 1).** Every allocation is persisted to the
+Every allocation is persisted to the
 :class:`~colabctl.state.StateStore` (metadata) plus the secret store (the proxy token,
 a credential), so a runtime created in one process can be *attached* from another —
 ``colabctl new`` then later ``exec -s NAME`` now works, ``stop`` never silently
 no-ops, and ``gc`` reclaims orphaned assignments. Cold attach reconnects via the
-GET-only :meth:`ColabBackendClient.refresh_assignment` (live-verified Phase A §②:
-same runtime, fresh token), falling back to a cached token when one is still valid.
+GET-only :meth:`ColabBackendClient.refresh_assignment`, which reconnects to the same
+runtime with a fresh token, or a cached token when one is still valid.
 
 The backend client, kernel factory, state store, and secret store are all injected, so
 the whole lifecycle is unit-testable with fakes (no network, no real keychain/home).
@@ -68,13 +68,13 @@ _NATIVE_ENV = "COLABCTL_ENABLE_NATIVE"
 #: token that would expire mid-use triggers a refresh instead.
 _TOKEN_REUSE_MARGIN_S = 120.0
 #: Budget for the keep-alive activity ping. Kernel executes queue behind a running
-#: cell, so an unbounded ping would wedge the keep-alive loop for the cell's whole
-#: duration (plan §5.5) — bound it and let the caller treat timeout as "kernel busy".
+#: cell, so an unbounded ping would block the keep-alive loop for the cell's whole
+#: duration. Bound it and let the caller treat timeout as "kernel busy".
 _KEEPALIVE_PING_TIMEOUT_S = 30.0
 
 
 def native_opt_in_enabled() -> bool:
-    """True if the reverse-engineered native transport has been explicitly enabled."""
+    """True if the custom native transport has been explicitly enabled."""
     return os.environ.get(_NATIVE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -82,10 +82,9 @@ def require_native_opt_in() -> None:
     """Raise unless the native transport has been opted into (env or allow_native)."""
     if not native_opt_in_enabled():
         raise ConfigurationError(
-            "The native /tun/m/* transport is reverse-engineered and DISABLED BY DEFAULT "
-            "per the sanctioned ToS posture. To opt in, set "
+            "The custom native /tun/m/* transport is DISABLED BY DEFAULT. To opt in, set "
             f"{_NATIVE_ENV}=1 (or pass allow_native=True) and accept the higher fragility "
-            "and abuse-detection exposure — see DIRECTIVES.md and spikes/PHASE0-FINDINGS.md §2."
+            "and provider-compatibility risk."
         )
 
 
@@ -179,7 +178,7 @@ class NativeColabTransport(TransportAdapter):
         """Build a transport with a real HTTP client bound to ``auth``.
 
         Opt-in gated: requires ``allow_native=True`` or ``COLABCTL_ENABLE_NATIVE=1``
-        (the reverse-engineered path is disabled by default — see ToS posture).
+        (the custom path is disabled by default).
         """
         if not allow_native:
             require_native_opt_in()
@@ -208,16 +207,14 @@ class NativeColabTransport(TransportAdapter):
             file_transfer=True,
             notebook_execution=False,
             caveats=[
-                "Reverse-engineered /tun/m/* transport — opt-in, disabled by default "
-                "per the sanctioned ToS posture.",
-                "keep_alive() uses the tunnel keep-alive ping (the google-colab-cli recipe: "
-                "GET /tun/m/<endpoint>/keep-alive/?authuser=0 + X-Colab-Tunnel: Google) — "
-                "headless, token-auth, no kernel needed; live-validated to hold a runtime "
-                "100+ min past idle with zero activity. (Falls back to a kernel-activity "
-                "ping if the tunnel ping is unavailable.) Colab's hard 12/24h cap still "
-                "applies — durable long jobs rely on checkpoint + auto-resume regardless.",
+                "Custom /tun/m/* transport; opt-in and disabled by default.",
+                "keep_alive() uses the tunnel keep-alive ping from google-colab-cli: "
+                "GET /tun/m/<endpoint>/keep-alive/?authuser=0 with X-Colab-Tunnel: Google. "
+                "It is headless, uses token authentication, and needs no kernel. It falls "
+                "back to a kernel-activity ping if the tunnel ping is unavailable. Colab's "
+                "runtime limits still apply, so long jobs need application checkpoints.",
                 "The legacy RuntimeService keep-alive RPC stays unusable under token auth "
-                "(401/403 — PHASE0-FINDINGS §2); the tunnel ping above is the working path.",
+                "(401/403); the tunnel ping above is the working path.",
                 "File transfer uses the Jupyter contents/files REST API over the runtime "
                 "proxy (chunked upload, ranged download); no kernel message-size ceiling.",
             ],
@@ -260,11 +257,11 @@ class NativeColabTransport(TransportAdapter):
     async def refresh_token(self, name: str) -> bool:
         """Refresh the runtime-proxy token in place for a session (no disruptive re-assign).
 
-        Uses the GET-only refresh primitive (Phase A §②: same runtime, fresh token), so a
+        Uses the GET-only refresh primitive (same runtime, fresh token), so a
         long session's credential is renewed without tearing down the runtime or kernel.
         The live kernel keeps its existing connection; the fresh token is what subsequent
         reconnects and REST transfers use. Returns ``False`` if there is no notebook id to
-        refresh from. This is the non-disruptive answer to §5.10.
+        refresh from.
         """
         sess = await self._ensure(name)
         if sess.notebook_id is None:
@@ -282,8 +279,8 @@ class NativeColabTransport(TransportAdapter):
 
         Consults the in-memory deadline first, then the persisted wall-clock expiry, so
         a lifecycle manager can refresh/re-assign before the credential dies even across
-        processes. Live-verified non-disruptive refresh (Phase A §②) is the durable
-        answer; see :meth:`ColabBackendClient.refresh_assignment`.
+        processes. See :meth:`ColabBackendClient.refresh_assignment` for the
+        non-disruptive refresh operation.
         """
         sess = self._sessions.get(name)
         if sess is not None and sess.proxy_deadline is not None:
@@ -390,12 +387,11 @@ class NativeColabTransport(TransportAdapter):
         works at the tunnel level under ordinary token auth, needs no kernel, and does not
         queue behind a running cell. Falls back to a best-effort kernel-activity ping when
         the endpoint isn't known locally or the tunnel ping is rejected. The legacy
-        RuntimeService RPC stays unusable under token auth (PHASE0-FINDINGS §2).
+        RuntimeService RPC is unusable under token authentication.
 
-        NOTE: ``Capabilities.keepalive`` stays ``False`` until a live run confirms the
-        tunnel ping actually holds a runtime past the idle window — see
-        ``spikes/phase_b_keepalive.py``. The ping is time-bounded so the keep-alive loop
-        never blocks behind a busy kernel (plan §5.5).
+        The capability reports that the transport can send keep-alive activity, not that a
+        runtime will remain allocated indefinitely. The ping is time-bounded so the
+        keep-alive loop never blocks behind a busy kernel.
         """
         endpoint = self._endpoint_for(name)
         if endpoint is not None:
@@ -422,7 +418,7 @@ class NativeColabTransport(TransportAdapter):
         ``True``/``False`` from the live ``/tun/m/assignments`` list; ``None`` when the
         endpoint cannot be resolved (no in-memory session and no stored record). The
         lifecycle manager uses this to distinguish *reclaimed* from a transient
-        transport blip before destroying a warm runtime (plan §5.4).
+        transport interruption before destroying a warm runtime.
         """
         sess = self._sessions.get(name)
         endpoint = sess.assignment.endpoint if sess is not None else None
@@ -435,7 +431,7 @@ class NativeColabTransport(TransportAdapter):
         return any(a.endpoint == endpoint for a in await self._client.list_assignments())
 
     async def interrupt(self, name: str) -> None:
-        """Interrupt the running cell on this session's kernel (REST; Phase A §④).
+        """Interrupt the running cell on this session's kernel through REST.
 
         Lets an agent stop a runaway computation without killing the whole runtime
         (which the v0.2 transport could only do). Requires a started kernel.
@@ -454,7 +450,7 @@ class NativeColabTransport(TransportAdapter):
         """Re-dial this session's kernel after a dropped websocket (keeps in-kernel state).
 
         No-op if no kernel is connected yet. The server-side kernel survives a websocket
-        drop (Phase A §③), so this restores the connection without losing state; only
+        drop, so this restores the connection without losing state; only
         idempotent work should be re-issued afterward.
         """
         sess = await self._ensure(name)

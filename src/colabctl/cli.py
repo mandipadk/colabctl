@@ -785,7 +785,7 @@ def gc(
 
 job_app = typer.Typer(
     name="job",
-    help="Run batch jobs across backends (colab | modal | vertex).",
+    help="Run batch jobs across configured backends.",
     no_args_is_help=True,
 )
 app.add_typer(job_app, name="job")
@@ -968,13 +968,14 @@ def job_run(
         False, "--cheapest", help="Route to the cheapest capable backend (use with --allow)"
     ),
     max_price: float | None = typer.Option(
-        None, "--max-price", help="Refuse any backend pricier than this $/hr (fail-closed cap)"
+        None,
+        "--max-price",
+        help="Refuse catalog entries pricier than this estimated $/hr",
     ),
     budget: float | None = typer.Option(
         None,
         "--budget",
-        help="Refuse to launch if cumulative ledger spend + this run would exceed $N "
-        "(fail-closed cumulative cap)",
+        help="Refuse if local estimated spend plus this projected run would exceed $N",
     ),
     track: str | None = typer.Option(
         None,

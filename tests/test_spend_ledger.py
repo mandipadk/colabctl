@@ -1,4 +1,4 @@
-"""Cross-backend USD spend ledger in the state store (Phase 2 cost-engine foundation)."""
+"""Test the cross-backend USD spend ledger in the state store."""
 
 from __future__ import annotations
 

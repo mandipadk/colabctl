@@ -1,9 +1,7 @@
-"""Contract/drift guard for the verified native /tun/m/* recipe.
+"""Contract and drift guard for the custom native /tun/m/* transport.
 
-These assertions pin the exact values reverse-engineered + cross-confirmed in Phase 0
-(from google-colab-cli + colab-mcp source). If any of them changes accidentally, this
-breaks loudly — the reverse-engineered contract must never drift silently.
-See spikes/PHASE0-FINDINGS.md §3.
+These assertions pin the request values cross-checked against the official CLI and Colab MCP
+source. An accidental change fails loudly instead of letting the custom contract drift silently.
 """
 
 from __future__ import annotations

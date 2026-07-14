@@ -57,7 +57,7 @@ class JobSpec(BaseModel):
     track: str | None = None
     #: Whether the workload resumes idempotently from its own checkpoint after a
     #: runtime re-assign — the opt-in that lets the lifecycle manager auto-resume a
-    #: detached job on reclamation (plan Pillar 2) rather than failing it.
+    #: detached job after runtime loss rather than failing it immediately.
     resumable: bool = False
 
     @model_validator(mode="after")
@@ -112,7 +112,7 @@ class BackendCapabilities(BaseModel):
     max_runtime_seconds: int | None = None
     requires_account: bool = True
     tos_posture: str = "sanctioned"  # "sanctioned" | "gray-area" | "prohibited"
-    #: Cost-engine flags (Phase 2). ``supports_spot``: offers an interruptible tier.
+    #: Cost-engine flags. ``supports_spot``: offers an interruptible tier.
     #: ``prepaid_wallet``: spend is gated by a prepaid balance (Vast/RunPod).
     #: ``preempt_notice_seconds``: graceful-drain window before a spot preemption
     #: (0 = none — the client must checkpoint frequently).

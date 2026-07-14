@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.5.0] - 2026-06-29
 
-Distribution & polish (Phase 5): cross-platform locking, a real docs site, and project
-governance. The 100x roadmap is now fully implemented.
+Distribution and polish: cross-platform locking, a documentation site, and public project
+governance.
 
 ### Added
 
@@ -42,9 +42,9 @@ Patch over 0.4.0.
   tracked run (`@remote(track=…)` / `job run --track`) crashed instead of running. A
   missing/broken secret backend now **fails open** — no credential found → run the workload
   without tracking (W&B → `WANDB_MODE=disabled`).
-- **Tolerate Colab's new `ineligibleGpus` ccu-info field** (the daily `/tun/m/*` canary caught it
-  — a benign additive field, not a protocol break). Surfaced as `CcuInfo.ineligible_gpus` and in
-  `colabctl quota` (`GPUs (n/a):`), and the canary baseline re-fingerprinted to match.
+- **Tolerate Colab's new `ineligibleGpus` ccu-info field.** The additive field is surfaced as
+  `CcuInfo.ineligible_gpus` and in `colabctl quota` (`GPUs (n/a):`). The scheduled
+  compatibility check detected the shape change, and its reviewed baseline was updated.
 
 ## [0.4.0] - 2026-06-25
 
@@ -90,7 +90,7 @@ and W&B/MLflow/Hydra integration. (Test suite 813 → 861.)
 
 ## [0.3.7] - 2026-06-25
 
-Phase 2c finale (the spot tier) + an Agent Skill so AI agents can discover and drive colabctl.
+Spot-tier support and an Agent Skill so AI agents can discover and drive colabctl.
 
 ### Added
 
@@ -111,8 +111,8 @@ Phase 2c finale (the spot tier) + an Agent Skill so AI agents can discover and d
 
 ## [0.3.6] - 2026-06-24
 
-Cost-aware arbitrage engine (Phase 2a + 2b + first 2c) — route to the cheapest qualifying
-backend under hard, fail-closed budget caps — plus a critical out-of-box install fix.
+Cost-aware routing to the cheapest qualifying catalog entry, spot support, and an out-of-box
+install fix.
 
 ### Added
 
@@ -178,8 +178,8 @@ the notebook runner finally reachable. (Test suite 708 → 758.)
   `colabctl job gc` (reconcile dead jobs to FAILED, prune terminal records past a TTL) and
   `colabctl job rm`.
 - **`colabctl update`** — self-upgrade to the latest PyPI release (auto-detects uv-tool vs pip).
-- Friendly missing-extra errors on a bare install; the daily drift **canary** now alerts
-  (auto-files a GitHub issue) and asserts baseline integrity.
+- Friendly missing-extra errors on a bare install; the scheduled compatibility check reports
+  failures through a GitHub issue.
 
 ### Fixed
 
@@ -199,17 +199,11 @@ the notebook runner finally reachable. (Test suite 708 → 758.)
 - **Streaming `run`/`exec`** so long interactive runs no longer look hung.
 - Ship `py.typed` (the `Typing :: Typed` classifier was unbacked); single-source `__version__`.
 
-### Changed
-
-- `Development Status` classifier `Pre-Alpha` → `Alpha`; README/ROADMAP/docs refreshed for
-  the working keep-alive and the durable fabric.
-
 ## [0.3.0] - 2026-06-11
 
-The **durability** release. colabctl gains a persistent fabric so sessions and jobs
-survive process exit, disconnects, and runtime reclamation — plus real-size data movement,
-runtime-direct Drive checkpoints, first-class auth UX, and a sanctioned browser transport
-that keeps its runtime alive. (Test suite 555 → 708.)
+This release added persistent cross-process sessions, detached runtime processes, poll-triggered
+job relaunch, real-size data movement, runtime-direct Drive helpers, authentication commands,
+and a browser transport. (Test suite 555 → 708.)
 
 ### Added
 
@@ -223,8 +217,9 @@ that keeps its runtime alive. (Test suite 555 → 708.)
   `status` / `logs -f` (resumes exactly after a disconnect) / `result` / `cancel` / `list`,
   mirrored in the SDK and MCP server (`submit_job`, `job_status`, `job_logs`, `job_result`,
   `cancel_job`).
-- **Auto-resume** (`--resumable`) — a reclaimed runtime is re-allocated and the job
-  relaunched, restoring from its own Drive checkpoint.
+- **Auto-resume** (`--resumable`): a later job poll can detect a reclaimed runtime, allocate a
+  replacement, and relaunch the stored workload. The workload restores its own external
+  checkpoint.
 - **Runtime-direct file transfer** over the Jupyter contents/files REST API — chunked
   upload, ranged streaming download (with fallback) — so real-size inputs/outputs move
   without the kernel in the data path (`gpu.upload()` / `gpu.download()`).
@@ -246,20 +241,14 @@ that keeps its runtime alive. (Test suite 555 → 708.)
   and SDK transport selectors.
 - **Interrupt / reconnect / output cap** — `gpu.interrupt()` stops a runaway cell without
   losing the VM; the native websocket auto-reconnects; kernel stream output is bounded.
-- **Drift canary** — a scheduled GitHub Action fingerprints the upstream Colab protocol and
-  flags structural drift before it reaches users.
+- **Custom-transport compatibility canary** — a scheduled GitHub Action fingerprints the
+  upstream Colab protocol and checks allocation, execution, transfer, and teardown.
 
 ### Changed
 
 - Repository URLs standardized to `github.com/mandipadk/colabctl`.
-- Documentation refreshed (architecture, deployment, roadmap, plan) for the durable fabric
-  and the resolved per-transport keep-alive story.
-
-### Removed
-
-- Internal planning artifacts (`SPEC.md`, `RESEARCH.md`, `DECISIONS.md`) are no longer
-  shipped in the repository; the architecture overview lives in `docs/architecture.md`, the
-  execution plan in `docs/plan.md`, and binding decisions in `DIRECTIVES.md`.
+- Documentation refreshed for cross-process sessions, detached jobs, data transfer, and each
+  transport's keep-alive behavior.
 
 ## [0.2.0] - 2026-06-08
 
@@ -320,9 +309,9 @@ First public release. Programmatic Google Colab control plus a multi-backend job
 - **Transports** behind a single `TransportAdapter` contract:
   - `cli` — wraps the official `google-colab-cli` (sanctioned default), with a
     golden-tested stdout parser pinned to v0.5.7.
-  - `native` — from-scratch `/tun/m/*` client + Jupyter-websocket kernel (co-primary,
-    opt-in). Both **live-validated** against real Colab Pro.
-- **Auth** — ADC-led providers (the Phase 0-verified path) + scope constants.
+  - `native` — custom, opt-in `/tun/m/*` client and Jupyter-websocket kernel. Both transports
+    were checked against real Colab Pro.
+- **Auth**: ADC-led providers and shared scope constants.
 - **Secrets** — one `SecretStore` contract over keyring (chunked), an encrypted file
   (headless/CI), and an in-memory store.
 - **SDK** — `ColabClient` / `ColabSession` (async, context-managed) and the `@remote`
@@ -353,8 +342,8 @@ First public release. Programmatic Google Colab control plus a multi-backend job
 - Vertex stdout is in Cloud Logging (not captured); `result` returns state + a log link.
 - Vertex / Hugging Face / Kaggle backends and the browser-bridge are not yet
   live-validated (no accounts in CI); their logic is unit-tested against fakes.
-- Still planned: RunPod/vast.ai + hyperscaler backends, a papermill notebook adapter,
-  a `jupyter_http_over_ws` integration test rig, a billing watchdog, and a docs site.
+- This release did not include RunPod, Vast.ai, hyperscaler backends, a papermill notebook
+  adapter, a `jupyter_http_over_ws` integration test rig, a billing watchdog, or a docs site.
 
 [Unreleased]: https://github.com/mandipadk/colabctl/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/mandipadk/colabctl/releases/tag/v0.1.0

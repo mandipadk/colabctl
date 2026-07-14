@@ -1,7 +1,7 @@
 """Runtime-side payloads for detached jobs — the kernel as a control plane.
 
-Pillar 2's core idea (validated by Phase A §③: the kernel survives a dropped
-websocket): instead of running user code as a foreground cell that monopolizes the
+The server-side kernel survives a dropped websocket. Instead of running user code as a
+foreground cell that monopolizes the
 kernel for hours, we write the code to the VM and launch it as a **detached,
 supervised process**. The kernel is then free, so short execs can poll status, tail
 the log by byte offset, and cancel — and a dropped connection costs a reconnect, not

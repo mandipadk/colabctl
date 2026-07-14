@@ -1,11 +1,8 @@
 """The transport contract.
 
-Every way of driving Colab — the official CLI, our native ``/tun/m/*`` client,
-the browser bridge — implements :class:`TransportAdapter`. This is the single
-seam that enforces the project's governing directive: *no CLI lock-in*. The SDK,
-provider abstraction, and MCP server speak only to this interface, so a regressed
-or missing CLI degrades to the native transport (or another backend) without any
-change above this line.
+Every way of driving Colab, including the official CLI, custom ``/tun/m/*`` client,
+and browser bridge, implements :class:`TransportAdapter`. The SDK, provider abstraction,
+and MCP server speak only to this interface, so callers are not tied to one transport.
 
 The interface is async because runtime allocation, execution streaming, and file
 transfer are all I/O-bound and long-running; synchronous convenience wrappers live
@@ -36,7 +33,7 @@ class Capabilities(BaseModel):
     streaming_output: bool = False  # can stream outputs as they arrive
     headless: bool = True  # works with zero human/browser involvement
     selectable_accelerator: bool = True
-    keepalive: bool = False  # can hold a runtime past idle reclamation
+    keepalive: bool = False  # can send activity intended to reduce idle reclamation
     file_transfer: bool = True
     notebook_execution: bool = False  # can run a whole .ipynb with output capture
     # Honest, machine-readable notes about limitations (e.g. the ADC keep-alive 403).

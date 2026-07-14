@@ -1,4 +1,4 @@
-"""Job reconcile + TTL gc + rm (Phase 1.6.4): stop the record leak; honest LOST state.
+"""Test job reconciliation, time-based garbage collection, removal, and LOST state.
 
 delete_job had zero callers and only sessions were reconciled, so terminal/orphaned job
 records accumulated forever and a job whose runtime was reclaimed lied RUNNING. gc_jobs

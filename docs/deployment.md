@@ -1,40 +1,38 @@
-# Deployment & operations
+# Deployment and operations
 
-How to run colabctl on a desktop or a headless server/CI, manage credentials, and
-operate it safely.
+Run colabctl on a desktop, an always-on host, or CI with credentials scoped to the provider and
+workload that need them.
 
 ## Credentials
 
-colabctl never writes credentials to plaintext. Secrets live behind one `SecretStore`:
+colabctl exposes two secret stores:
 
-- **Desktop** — OS keychain (`KeyringSecretStore`), used automatically.
-- **Headless / CI** — `EncryptedFileSecretStore`: set `COLABCTL_SECRET_PASSPHRASE` and
-  secrets are stored in an scrypt+Fernet-encrypted file. `default_secret_store()` picks
-  this automatically when the passphrase env var is set.
+- `KeyringSecretStore` uses the operating-system keychain.
+- `EncryptedFileSecretStore` uses an scrypt-derived key and Fernet encryption. Set
+  `COLABCTL_SECRET_PASSPHRASE` on a headless host to select it.
 
-Per-backend auth:
+The local state document stores session and job metadata, not secret values.
 
 | Backend | Credentials |
 |---|---|
-| Colab, Vertex | Google ADC — `gcloud auth application-default login --scopes=…colaboratory` (see below) |
-| Modal | `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` (or `~/.modal.toml`) |
-| Hugging Face | `HF_TOKEN` |
-| Kaggle | `~/.kaggle/kaggle.json` (or `KAGGLE_USERNAME` / `KAGGLE_KEY`) |
+| Colab and Vertex AI | Google Application Default Credentials |
+| Modal | `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or `~/.modal.toml` |
+| Hugging Face Jobs | `HF_TOKEN` |
+| Kaggle | `~/.kaggle/kaggle.json`, or `KAGGLE_USERNAME` and `KAGGLE_KEY` |
 | RunPod | `RUNPOD_API_KEY` |
+| Vast.ai | `VAST_API_KEY` |
 
-### Colab ADC
+## Colab authentication
 
-ADC is **one-time per machine** (the refresh token persists). colabctl wraps the setup:
+colabctl wraps the Application Default Credentials login and reports missing scopes or quota
+configuration:
 
 ```bash
-colabctl auth login     # runs the gcloud ADC login with the exact scopes needed
-colabctl auth status    # account · scopes · Drive quota project · what to fix
+colabctl auth login
+colabctl auth status
 ```
 
-`auth status` introspects the token (via Google's tokeninfo) and reports whether
-`colaboratory`/`drive.file` are granted and whether a Drive quota project is set — so a
-missing scope or quota project is caught up front, not as a runtime 401/403. The equivalent
-manual command (also printed by `colabctl auth scopes`):
+The equivalent manual login is:
 
 ```bash
 gcloud auth application-default login \
@@ -44,72 +42,115 @@ https://www.googleapis.com/auth/colaboratory,\
 https://www.googleapis.com/auth/drive.file
 ```
 
-`cloud-platform` + `openid` are required by gcloud itself; `colaboratory` by the Colab
-backend; `drive.file` by Drive sync. **Runtime-direct Drive checkpoints** additionally need
-a quota project with the Drive API enabled (per-user ADC credentials are billed against a
-project, or Drive returns 403):
+Runtime-direct Drive operations need a quota project with the Drive API enabled:
 
 ```bash
 gcloud services enable drive.googleapis.com --project=YOUR_PROJECT
-gcloud auth application-default set-quota-project YOUR_PROJECT   # colabctl auto-detects it
+gcloud auth application-default set-quota-project YOUR_PROJECT
 ```
 
-## Headless / long-running jobs
+## Custom Colab transport
 
-- **Native transport** is opt-in: set `COLABCTL_ENABLE_NATIVE=1` (it's reverse-engineered
-  and disabled by default per the ToS posture).
-- **Headless keep-alive (native):** the native transport keeps a runtime alive with the
-  **tunnel keep-alive ping** (`GET /tun/m/<endpoint>/keep-alive/?authuser=0` +
-  `X-Colab-Tunnel: Google`, the google-colab-cli recipe) — token-auth, no browser tab,
-  no kernel needed; live-validated to hold a runtime **100+ min past idle** with zero
-  activity. (The legacy RuntimeService RPC remains unusable under token auth.) Colab's
-  hard 12/24h cap still applies, so for long unattended work:
-  - submit a **detached job** (`colabctl -t native job run --detach --resumable`): it runs
-    as a supervised process on the VM and **auto-resumes** from your checkpoint if the
-    runtime is reclaimed — the durable path, robust to disconnects and client exit;
-  - **checkpoint to Drive + re-assign** via `RuntimeLifecycleManager` — runtime-direct
-    `DriveCheckpointer` (the VM uploads straight to Drive), or the client-side
-    `drive_checkpoint_hooks` fallback;
-  - for *interactive* work, use the **browser transport** (`-t browser`): it keeps its
-    runtime alive via genuine cell activity in your authenticated tab;
-  - or route deadline-bound production jobs to **Vertex** or **Modal** instead.
+The custom transport uses the CLI name `native` and is disabled by default. Enable it for the
+process that runs colabctl:
+
+```bash
+export COLABCTL_ENABLE_NATIVE=1
+colabctl --transport native doctor
+```
+
+It supports headless keep-alive through the Colab tunnel endpoint, cross-process attach,
+interrupt, runtime file transfer, and detached jobs. Provider protocol changes can break this
+transport even when the official CLI continues to work, so keep colabctl current and check the
+exact workflow after an update before unattended use.
+
+## Detached jobs
+
+```bash
+export COLABCTL_ENABLE_NATIVE=1
+JOB_ID=$(colabctl --transport native job run train.py --detach --resumable --gpu T4)
+colabctl --transport native job logs "$JOB_ID" --follow
+colabctl --transport native job result "$JOB_ID"
+```
+
+The supervised process remains on the runtime after the submitting shell exits. A later
+`status`, `logs`, or `result` command uses the local state record to reconnect.
+
+If `status` or `result` observes that a resumable job lost its runtime, colabctl can allocate a
+replacement and relaunch the stored specification. Your program must save its checkpoint to
+Drive or another durable location and restore it when the new process starts. colabctl does not
+yet run that restore step for arbitrary application code, and recovery does not run while every
+controller process is offline.
+
+Runtime-local logs can disappear with a reclaimed runtime. Treat external experiment tracking,
+object storage, or application logs as the durable record for long jobs.
+
+## Lifecycle manager
+
+Applications that need direct control can provide checkpoint and restore callbacks to
+`RuntimeLifecycleManager`:
 
 ```python
-from colabctl import RuntimeLifecycleManager, DriveSync, drive_checkpoint_hooks
-# ... build a transport ...
-checkpoint, restore = drive_checkpoint_hooks(DriveSync(), [("content/state.pkl", "state.pkl")])
-mgr = RuntimeLifecycleManager(transport, spec, checkpoint=checkpoint, restore=restore,
-                              reassign_before_expiry=True)
+from colabctl import DriveSync, RuntimeLifecycleManager, drive_checkpoint_hooks
+
+checkpoint, restore = drive_checkpoint_hooks(
+    DriveSync(),
+    [("content/state.pkl", "state.pkl")],
+)
+manager = RuntimeLifecycleManager(
+    transport,
+    spec,
+    checkpoint=checkpoint,
+    restore=restore,
+    reassign_before_expiry=True,
+)
 ```
 
-## Driving from an AI agent (MCP)
+The application owns checkpoint consistency and compatibility. Write a complete checkpoint
+before publishing it as the latest restorable version.
+
+## MCP server
 
 ```json
-{ "mcpServers": { "colabctl": { "command": "colabctl-mcp" } } }
+{
+  "mcpServers": {
+    "colabctl": {
+      "command": "colabctl-mcp"
+    }
+  }
+}
 ```
 
-The server exposes interactive Colab tools (`allocate_runtime`, `run_code`,
-`interrupt_runtime`, …), the durable submit→poll job set (`submit_job`, `job_status`,
-`job_logs`, `job_result`, `cancel_job`), and `run_job` / `list_backends` across all
-backends. Run it under a process manager for always-on agent access.
+The MCP server can allocate runtimes and execute arbitrary code with the credentials available
+to its process. Run it under a dedicated account, limit its filesystem access, and avoid exposing
+the local stdio server through an unauthenticated network bridge.
 
-## Abuse-detection risk (disclosed)
+## Operational checks
 
-Even on paid Colab Pro with a positive balance, Google operates **opaque, no-recourse
-abuse-detection bans** on sustained headless GPU usage — the blast radius is the whole
-Google account. colabctl treats this as a first-class fact:
+Run these before a paid or unattended job:
 
-- defaults to the sanctioned CLI path (lowest divergence from first-party clients),
-- never fakes "active programming" or runs multi-account quota circumvention,
-- enforces single-session-per-runtime by default,
-- and lets you **fail over to Modal/Vertex** so a ban degrades capability instead of
-  killing the workflow.
+```bash
+colabctl doctor
+colabctl auth status
+colabctl quota
+colabctl sessions
+colabctl job list
+```
 
-Don't share or resell access, and respect each backend's terms.
+Use `colabctl gc` to compare local session records with live Colab assignments. Add
+`--release-orphans` only when you intend to release provider resources that have no active local
+record.
 
-## Spend guards
+## Spend controls
 
-- `cap_timeout` enforces a hard billable-time ceiling on paid backends (wired into Modal).
-- The RunPod backend always terminates the pod on `result()`.
-- Always pass `timeout`s; never point an autonomous agent loop at a paid backend without
-  a hard cap.
+- Set a timeout for paid providers.
+- Treat `--max-price`, `--budget`, `colabctl cost`, and `colabctl spend` as catalog and ledger
+  estimates.
+- Persist outputs before result collection tears down an ephemeral pod or sandbox.
+- Check the provider console when cancellation or cleanup returns an error.
+
+## Provider terms
+
+Use the official Colab CLI transport by default. Do not share or resell provider access, rotate
+accounts to evade limits, or automate behavior that violates a provider's current terms. Quotas,
+prices, capacity, and acceptable-use rules can change independently of colabctl.

@@ -6,17 +6,19 @@ Guidance for AI agents (and humans) contributing to the colabctl codebase. This 
 
 ## What this is
 
-colabctl is a Python package + CLI (`colabctl`) + MCP server (`colabctl-mcp`) for durable,
-cost-aware GPU orchestration over Google Colab and Modal/Vertex/HF/Kaggle/RunPod/Vast. The core
-value is **durability** (detached jobs that auto-resume from checkpoints across runtime
-reclamation) and a **cost engine** (cheapest-first routing under fail-closed budget caps).
+colabctl is a Python package, CLI (`colabctl`), and MCP server (`colabctl-mcp`) for interactive
+and batch GPU work across Google Colab, Modal, Vertex AI, Hugging Face Jobs, Kaggle, RunPod, and
+Vast.ai. Detached Colab processes survive client disconnects on the same runtime. For jobs marked
+resumable, a later poll can relaunch the stored workload after runtime loss; the application must
+restore its own external checkpoint. The cost engine provides catalog-price routing and local
+spend estimates.
 
 ## Setup & the verification gate
 
-Use `uv`. Before every commit, all three must be clean:
+Use `uv`. Before every commit, all four must be clean:
 
 ```bash
-uv run --all-extras pytest -q        # ~810 tests, hermetic (no network/Colab needed)
+uv run --all-extras pytest -q        # ~864 tests, hermetic (no network/Colab needed)
 uv run --all-extras mypy src         # strict; must say "no issues"
 uv run ruff check src tests          # lint
 uv run ruff format src tests         # format
@@ -27,7 +29,7 @@ Requires Python 3.12+ (the bundled google-colab-cli's floor).
 ## Architecture (where things live)
 
 - `transport/` — **interactive** runtimes (allocate a warm GPU, run cells). `cli` (drives
-  Google's `colab` binary, the default), `native` (reverse-engineered `/tun/m/*`, opt-in via
+  Google's `colab` binary, the default), `native` (custom `/tun/m/*`, opt-in via
   `COLABCTL_ENABLE_NATIVE=1`), `browser`. A `TransportAdapter`.
 - `backends/` — **batch jobs** (submit → poll → result) across providers. `Backend` +
   `BackendRouter` (capability routing, infra-error failover, cheapest-first cost routing).
@@ -51,5 +53,4 @@ Requires Python 3.12+ (the bundled google-colab-cli's floor).
 
 Bump `__version__` + CHANGELOG, commit, push `main`, then tag `vX.Y.Z` and push the tag — the
 `Publish to PyPI` GitHub Action publishes via Trusted Publishing. Create a GitHub release with
-the built `dist/` artifacts. Run the pre-push audit (no secrets/personal paths; internal
-strategy docs stay gitignored).
+the built `dist/` artifacts. Run the pre-push audit for secrets and personal paths.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from colabctl.models import Accelerator, CcuInfo
 from colabctl.spend import spend_report
 
-# The verified live ccu-info shape (canary, 2026-06-11; ineligibleGpus added 2026-06-25).
+# A captured live ccu-info shape with the ineligibleGpus field added in 2026.
 _RAW = {
     "assignmentsCount": 1,
     "consumptionRateHourly": 1.96,
@@ -23,7 +23,7 @@ def test_ccu_info_parses_real_shape() -> None:
     assert ccu.consumption_rate_hourly == 1.96
     assert ccu.assignments_count == 1
     assert ccu.eligible_gpus == ["T4", "L4", "A100"]
-    assert ccu.ineligible_gpus == ["H100"]  # added by Colab 2026-06-25 (canary drift #1)
+    assert ccu.ineligible_gpus == ["H100"]
     assert round(ccu.runway_hours, 1) == 51.0  # 100 / 1.96
 
 

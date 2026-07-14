@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from colabctl.drift import skeleton_diff, structural_fingerprint, structural_skeleton
+import hashlib
+import json
+from pathlib import Path
+
+from colabctl.drift import (
+    compare_structural_snapshot,
+    skeleton_diff,
+    structural_fingerprint,
+    structural_skeleton,
+    structural_snapshot,
+)
 
 
 def test_skeleton_discards_values_keeps_types() -> None:
@@ -25,6 +35,46 @@ def test_fingerprint_changes_on_added_key() -> None:
 
 def test_fingerprint_changes_on_type_change() -> None:
     assert structural_fingerprint({"variant": "GPU"}) != structural_fingerprint({"variant": 1})
+
+
+def test_snapshot_fingerprints_raw_values_without_double_normalizing() -> None:
+    integer_fingerprints, _ = structural_snapshot({"assignments": {"variant": 1}})
+    string_fingerprints, _ = structural_snapshot({"assignments": {"variant": "1"}})
+    assert integer_fingerprints["assignments"] != string_fingerprints["assignments"]
+
+
+def test_snapshot_comparison_reports_drift() -> None:
+    baseline_fingerprints, baseline_skeletons = structural_snapshot({"value": {"kind": 1}})
+    actual_fingerprints, actual_skeletons = structural_snapshot({"value": {"kind": "1"}})
+    healthy, notes = compare_structural_snapshot(
+        actual_fingerprints,
+        actual_skeletons,
+        {"fingerprints": baseline_fingerprints, "skeletons": baseline_skeletons},
+    )
+    assert healthy is False
+    assert notes[0].startswith("value DRIFTED:")
+
+
+def test_snapshot_comparison_fails_on_missing_key() -> None:
+    baseline_fingerprints, baseline_skeletons = structural_snapshot(
+        {"assignments": {"count": 1}, "ccu-info": {"balance": 1.0}}
+    )
+    actual_fingerprints, actual_skeletons = structural_snapshot({"assignments": {"count": 1}})
+    healthy, notes = compare_structural_snapshot(
+        actual_fingerprints,
+        actual_skeletons,
+        {"fingerprints": baseline_fingerprints, "skeletons": baseline_skeletons},
+    )
+    assert healthy is False
+    assert notes == ["ccu-info missing from captured responses"]
+
+
+def test_snapshot_comparison_fails_without_baseline() -> None:
+    fingerprints, skeletons = structural_snapshot({"assignments": {"count": 1}})
+    assert compare_structural_snapshot(fingerprints, skeletons, None) == (
+        False,
+        ["required baseline is missing"],
+    )
 
 
 def test_key_order_does_not_matter() -> None:
@@ -53,15 +103,12 @@ def test_no_diff_for_identical_shapes() -> None:
 
 
 def test_canary_baseline_fingerprints_match_their_skeletons() -> None:
-    # Invariant: a re-baseline must recompute the fingerprint from the (verified) skeleton.
-    # Catches a hand-edited baseline whose hash got out of sync with its shape.
-    import json
-    from pathlib import Path
-
-    baseline = json.loads(
-        (Path(__file__).resolve().parent.parent / "spikes" / "canary-baseline.json").read_text()
-    )
+    baseline_path = Path(__file__).resolve().parent / "fixtures" / "colab_protocol_baseline.json"
+    baseline = json.loads(baseline_path.read_text())
+    assert baseline["fingerprints"].keys() == baseline["skeletons"].keys()
     for name, skeleton in baseline["skeletons"].items():
-        assert structural_fingerprint(skeleton) == baseline["fingerprints"][name], (
-            f"{name}: fingerprint is stale vs its skeleton"
+        canonical = json.dumps(skeleton, sort_keys=True)
+        fingerprint = hashlib.sha256(canonical.encode()).hexdigest()[:16]
+        assert fingerprint == baseline["fingerprints"][name], (
+            f"{name}: fingerprint is stale relative to its skeleton"
         )

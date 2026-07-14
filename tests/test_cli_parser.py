@@ -1,8 +1,7 @@
-"""Golden tests for the CLI parser, pinned to the live Phase 0 transcript.
+"""Golden tests for the CLI parser, pinned to observed CLI output.
 
-Every string here is copied verbatim from a real `google-colab-cli` v0.5.7 run
-against Colab Pro (see spikes/phase0-results.txt). If the CLI's output grammar
-drifts, these break loudly — exactly the contract guard we want.
+The strings mirror output from a real ``google-colab-cli`` v0.5.7 run against Colab Pro.
+If the CLI's output grammar drifts, these tests fail as a contract guard.
 """
 
 from __future__ import annotations
@@ -127,11 +126,11 @@ def test_parse_terminated():
 
 
 def test_parse_ls_output_skips_colab_lines():
-    text = ".config/\nsample_data/\nphase0_upload_test.txt\n[colab] note\n"
+    text = ".config/\nsample_data/\nupload_test.txt\n[colab] note\n"
     assert parser.parse_ls_output(text) == [
         ".config/",
         "sample_data/",
-        "phase0_upload_test.txt",
+        "upload_test.txt",
     ]
 
 

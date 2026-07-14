@@ -1,4 +1,4 @@
-"""Spot interruption-risk reference, fed by AWS's free public Spot Advisor feed (Phase 2c).
+"""Spot interruption-risk reference fed by AWS's public Spot Advisor feed.
 
 The feed (``spot-advisor-data.json``) is the only authoritative, machine-readable per-GPU
 interruption-rate + savings source. It is AWS-EC2-specific, so for colabctl it is a

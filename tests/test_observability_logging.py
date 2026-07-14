@@ -1,4 +1,4 @@
-"""Structured JSON logging + correlation ids + event sink (Phase 4.10.4 + 10.2)."""
+"""Test structured JSON logging, correlation IDs, and the event sink."""
 
 from __future__ import annotations
 

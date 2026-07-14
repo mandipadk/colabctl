@@ -1,9 +1,7 @@
-"""Tunnel keep-alive (Phase 0.6): the google-colab-cli recipe + adapter wiring.
+"""Test the tunnel keep-alive request and custom transport adapter wiring.
 
 The client method is asserted against the exact HTTP recipe; the adapter is asserted to
 prefer the tunnel ping (no kernel needed) and fall back to kernel activity when it fails.
-The tunnel ping is live-validated (spikes/phase_b_keepalive.py held a runtime 100+ min past
-idle with no activity), so native ``Capabilities.keepalive`` is True.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Experiment-tracking integration: Weights & Biases + MLflow (Phase 4.10.5).
+"""Experiment-tracking integration for Weights & Biases and MLflow.
 
 Opt-in via ``track="wandb"|"mlflow"`` on ``@remote`` / a detached job. The design is **pure
 environment injection** — colabctl never imports wandb/mlflow itself; credentials come from the
@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-#: The only trackers we support (the plan's selective scope; ZenML/Comet/etc. are out).
+#: The supported experiment trackers.
 TRACKERS: tuple[str, ...] = ("wandb", "mlflow")
 
 #: secret-store account -> env var, per tracker. Accounts live under service "colabctl".

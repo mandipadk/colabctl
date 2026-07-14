@@ -99,8 +99,8 @@ def cap_stream_output(result: ExecutionResult, max_chars: int) -> ExecutionResul
 
     Returns ``result`` unchanged when under the cap or when ``max_chars`` is non-positive.
     Otherwise the stream outputs are merged into a single stdout stream holding the head
-    and tail with an honest ``…[N chars truncated]…`` marker between them — so a runaway
-    interactive exec can't balloon the client's memory (plan §5.9). Non-stream outputs
+    and tail with an honest ``…[N chars truncated]…`` marker between them, so a runaway
+    interactive execution cannot exhaust the client's memory. Non-stream outputs
     (results, errors) are preserved; live ``on_output`` streaming is unaffected.
     """
     if max_chars <= 0:
@@ -227,10 +227,10 @@ class NativeKernel:
             await asyncio.to_thread(self._client.restart)
 
     async def reconnect(self) -> None:
-        """Re-dial the SAME server-side kernel after a dropped websocket (Phase A §③).
+        """Reconnect to the same server-side kernel after a dropped websocket.
 
         The kernel survives a websocket drop (``_own_kernel=False``), so we tear down
-        the dead client connection and rebuild against the retained ``kernel_id`` —
+        the dead client connection and rebuild against the retained ``kernel_id``;
         in-kernel state is preserved. Requires a known kernel id (start the kernel first).
         Note: callers must only re-issue *idempotent* work after a reconnect; a
         reconnect cannot know whether code sent before the drop already ran.

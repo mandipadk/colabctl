@@ -1,14 +1,14 @@
 """Minimal MCP (Model Context Protocol) client over a connected WebSocket.
 
-Colab's "local Colab MCP server" connects to us and acts as the MCP *server* — it exposes
+Colab's "local Colab MCP server" connects to us and acts as the MCP *server*. It exposes
 notebook tools (``add_code_cell``, ``run_code_cell``, ``get_cells``, …) and announces them
 with ``notifications/tools/list_changed``. We are the *client*: this drives the standard
 handshake (``initialize`` → ``notifications/initialized``) and exposes ``list_tools`` /
 ``call_tool`` with JSON-RPC id correlation. The websocket is injected, so the whole thing
 is testable against an in-memory ColabMCP fake (no browser).
 
-Protocol confirmed live in Phase A (2026-06-11): subprotocol ``mcp``, token via the
-``?access_token=`` query param, ``serverInfo.name == "ColabMCP"``.
+The connection uses the ``mcp`` subprotocol, passes the token in the ``?access_token=``
+query parameter, and expects ``serverInfo.name == "ColabMCP"``.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class McpClient:
                 except (TypeError, ValueError):
                     continue
                 mid = msg.get("id")
-                if mid is None:  # a notification (e.g. tools/list_changed) — no reply expected
+                if mid is None:  # a notification (for example tools/list_changed); no reply
                     continue
                 fut = self._pending.pop(mid, None)
                 if fut is None or fut.done():

@@ -1,9 +1,9 @@
 """Domain models for colabctl.
 
 These pydantic models are the *lingua franca* every layer and backend speaks.
-The accelerator/variant/shape enums and the assignment/proxy models mirror the
-Colab backend wire contract verified in Phase 0 (see ``spikes/PHASE0-FINDINGS.md``
-§3); the session/execution/output models are the provider-neutral domain types
+The accelerator, variant, and shape enums plus the assignment/proxy models mirror the
+Colab backend wire contract. The session, execution, and output models are provider-neutral
+domain types
 the SDK, CLI, and MCP server expose to callers.
 """
 
@@ -153,7 +153,7 @@ class SessionInfo(BaseModel):
 class CcuInfo(BaseModel):
     """Compute-unit standing for a Colab account (``/tun/m/ccu-info``).
 
-    Shape verified live (canary, 2026-06-11; ``ineligibleGpus`` added 2026-06-25);
+    Shape checked against live responses; ``ineligibleGpus`` was added 2026-06-25.
     ``extra="ignore"`` so the model tolerates the undocumented endpoint adding fields without
     breaking. All fields are optional.
     """

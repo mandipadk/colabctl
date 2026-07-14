@@ -4,9 +4,9 @@ The sanctioned, human-in-the-loop Colab path: a local origin-restricted, token-a
 WebSocket that a logged-in Colab tab connects to as an MCP **server**, exposing Colab's
 own notebook tools (``run_code_cell``, ``add_code_cell``, ``get_cells``, …). colabctl is
 the MCP **client** (:class:`McpClient`) and drives those tools to execute code, move files,
-and — uniquely among the transports — **keep the runtime alive** (a no-op cell is genuine
-activity in the authenticated session). Protocol confirmed live in Phase A (2026-06-11);
-see ``spikes/PHASE-A-FINDINGS.md`` ⑤/⑧.
+and, uniquely among the transports, **keep the runtime alive** (a no-op cell is genuine
+activity in the authenticated session). The connection uses the ``mcp`` subprotocol and
+authenticates with the bridge access token.
 """
 
 from __future__ import annotations

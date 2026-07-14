@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "colabctl"
 dynamic = ["version"]
-description = "Programmatic control of Google Colab for developers and AI agents — allocate GPUs, run code & notebooks, sync files, without the website."
+description = "Interactive and batch GPU control for Google Colab and other providers."
 readme = "README.md"
 # 3.12+ to match the bundled google-colab-cli (which powers the default `cli` transport).
 requires-python = ">=3.12"
@@ -13,7 +13,6 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "colabctl contributors" }]
 keywords = ["colab", "gpu", "jupyter", "mcp", "ml", "remote-execution"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: Apache Software License",
@@ -32,7 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Native /tun/m/* transport + kernel execution (the from-scratch path).
+# Custom /tun/m/* transport and kernel execution.
 native = [
     "jupyter-kernel-client>=0.9.0",
     "google-auth>=2.49.1",
@@ -51,7 +50,7 @@ secrets = ["keyring>=25.0", "cryptography>=42.0"]
 mcp = ["mcp>=1.2"]
 # Google Drive durable file sync.
 drive = ["google-api-python-client>=2.0", "google-auth>=2.49.1"]
-# Sanctioned alt-backends (v1 scope: Modal + Vertex).
+# Provider SDK integrations.
 modal = ["modal>=0.64"]
 vertex = ["google-cloud-aiplatform>=1.60"]
 hf = ["huggingface_hub>=0.34"]
@@ -98,10 +97,9 @@ packages = ["src/colabctl"]
 artifacts = ["src/colabctl/py.typed"]
 
 [tool.hatch.build.targets.sdist]
-# The wheel is src-only, but the sdist defaults to everything not VCS-ignored. Keep the internal
-# R&D spikes (reconnaissance notes + Colab's public web key) and CI workflows out of the PyPI
-# source archive (the .hypothesis cache is gitignored). src/, tests/, docs/ + metadata still ship.
-exclude = ["spikes/", ".github/"]
+# The wheel is src-only. Keep CI workflows and local-only workspace files out of the PyPI source
+# archive; src/, tests/, docs/, and package metadata still ship.
+exclude = [".github/", ".local/"]
 
 [tool.ruff]
 line-length = 100

@@ -6,9 +6,9 @@ SDK, CLI, MCP) depend only on the :class:`~colabctl.transport.base.TransportAdap
 contract, never on a concrete transport.
 
 Concrete transports:
-- ``cli``    — wraps the official ``google-colab-cli`` (sanctioned default).
-- ``native`` — our from-scratch ``/tun/m/*`` + Jupyter-websocket client (co-primary, opt-in).
-- ``browser``— colab-mcp browser-bridge (secondary, human-in-the-loop) [planned].
+- ``cli`` wraps the official ``google-colab-cli`` and is the default.
+- ``native`` is the custom, opt-in ``/tun/m/*`` and Jupyter-websocket client.
+- ``browser`` is the human-in-the-loop Colab MCP browser bridge.
 """
 
 from __future__ import annotations

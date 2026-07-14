@@ -1,4 +1,4 @@
-"""``colabctl doctor`` — preflight health checks (Phase 4.10.3).
+"""``colabctl doctor`` preflight health checks.
 
 Answers "why can't I get a GPU / why won't this run" *before* you burn time, by surfacing the
 signals colabctl already has: ADC credentials, the default transport's ``colab`` binary,

@@ -1,5 +1,5 @@
 site_name: colabctl
-site_description: Durable, cost-aware, agent-native control of Google Colab + other GPU backends.
+site_description: Interactive and batch GPU control for Google Colab and other providers.
 repo_url: https://github.com/mandipadk/colabctl
 repo_name: mandipadk/colabctl
 edit_uri: edit/main/docs/
@@ -53,9 +53,5 @@ nav:
   - Architecture: architecture.md
   - API reference: api.md
   - Deployment: deployment.md
-
-# Strategy/roadmap docs are dev-facing, not for the public site.
-exclude_docs: |
-  plan*.md
 
 # Build with: uvx --with-requirements <docs deps> mkdocs build  (or: uv run --group docs mkdocs serve)

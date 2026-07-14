@@ -1,4 +1,4 @@
-"""Live price-feed parsers (Phase 2b) — contract-tested hermetically against captured shapes.
+"""Contract tests for live price-feed parsers using captured response shapes.
 
 The ``fetch`` is injected, so these never touch the network. A drift in the upstream schema
 (renamed/removed fields) makes these fail loudly rather than silently misprice.

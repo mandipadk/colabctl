@@ -127,7 +127,7 @@ def test_unknown_transport_name_raises():
         ColabClient(transport_name="bogus")
 
 
-# -- allocation ladder (§5.2) -------------------------------------------------
+# -- allocation ladder -------------------------------------------------------
 
 
 def test_resolve_ladder_parses_csv_and_dedups():

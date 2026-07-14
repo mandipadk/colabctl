@@ -1,4 +1,4 @@
-"""`colabctl job history` prints a job's state-transition timeline (Phase 1.6.5)."""
+"""Test that ``colabctl job history`` prints a job's state-transition timeline."""
 
 from __future__ import annotations
 

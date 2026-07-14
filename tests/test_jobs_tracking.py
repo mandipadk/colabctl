@@ -1,4 +1,4 @@
-"""Detached-job experiment tracking: env threading + lineage capture (Phase 4.10.5, part 3)."""
+"""Test detached-job tracking environment injection and lineage capture."""
 
 from __future__ import annotations
 

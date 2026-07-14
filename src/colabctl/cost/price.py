@@ -6,8 +6,8 @@ pluggable feed interface; ``PriceCatalog`` is the consumer facade that queries a
 source chain and always falls back to the in-repo static table — so cheapest-routing and the
 USD cap **always** have a number to reason about, even with every live feed down.
 
-Phase 2a ships only :class:`StaticPriceSource`; Phase 2b adds httpx-backed live sources
-behind the same ABC, with the static table demoted to the fallback (never removed).
+The static source provides a zero-network floor. HTTP-backed live sources implement the same
+ABC, with the static table retained as a fallback.
 """
 
 from __future__ import annotations
@@ -46,8 +46,8 @@ def _p(provider: str, accel: Accelerator, on_demand: float, spot: float | None =
 
 
 #: Hand-maintained, conservative USD/hour estimates (June 2026), updated by PR. The live
-#: feeds in Phase 2b supersede these; they exist so the cost engine has a zero-network floor
-#: and so 2a is fully testable offline. Colab/Kaggle are modelled at their effective marginal
+#: feeds can supersede these; they exist so the cost engine has a zero-network floor and remains
+#: fully testable offline. Colab/Kaggle are modelled at their effective marginal
 #: cost (Kaggle's free weekly quota = $0; Colab Pro's compute-unit burn ≈ a low $/hr).
 STATIC_GPU_PRICES: list[GpuPrice] = [
     # Colab Pro — effective compute-unit cost (not a true $/hr; superseded by live quota math)
