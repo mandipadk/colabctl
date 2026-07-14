@@ -1,7 +1,7 @@
-"""Native Colab backend client — the ``/tun/m/*`` assignment protocol.
+"""Client for the custom Colab ``/tun/m/*`` assignment protocol.
 
-Verified from ``google-colab-cli`` v0.5.7 source in Phase 0 (Apache-2.0, port
-permitted). Pure helpers (``web_safe_nbh``, ``strip_xssi``, ``build_assign_params``,
+The protocol implementation is compatible with ``google-colab-cli`` v0.5.7. Pure helpers
+(``web_safe_nbh``, ``strip_xssi``, ``build_assign_params``,
 the public-API-key decode) are deterministic and unit-tested offline; the network
 methods use an injected ``httpx.AsyncClient`` and a pluggable bearer-token provider
 so auth (ADC/OAuth) is decoupled from transport.
@@ -9,8 +9,8 @@ so auth (ADC/OAuth) is decoupled from transport.
 Keep-alive note (live-confirmed): the RuntimeService keep-alive RPC is unusable from
 token auth — bearer returns 403 (no serviceusage permission on Colab's project),
 API-key-only returns 401 ("API keys are not supported by this API"). Only the browser
-web client succeeds, via session cookies. The working keep-alive is therefore kernel
-activity, not this RPC — see ``NativeColabTransport.keep_alive`` and PHASE0-FINDINGS §2.
+web client succeeds via session cookies. The custom transport uses tunnel or kernel
+activity instead; see ``NativeColabTransport.keep_alive``.
 """
 
 from __future__ import annotations
@@ -330,13 +330,13 @@ class ColabBackendClient:
 
         Runs ONLY the assign GET pre-flight with the given ``nbh`` — it never POSTs, so
         it cannot accidentally allocate a new runtime. If the runtime still exists the
-        backend returns it directly with a *fresh* ``runtimeProxyInfo`` (live-verified
-        Phase A §②: same endpoint, new token); if it has been reclaimed the pre-flight
+        backend returns it directly with a *fresh* ``runtimeProxyInfo`` for the same
+        endpoint; if it has been reclaimed the pre-flight
         returns only an XSRF token (the prelude to a *new* allocation), which we refuse
         with :class:`RuntimeUnavailableError` instead of silently re-allocating.
 
-        This is the primitive behind native cross-process *attach* and the
-        non-disruptive proxy-token refresh (plan §5.10).
+        This is the primitive behind custom-transport cross-process *attach* and
+        non-disruptive proxy-token refresh.
         """
         nbh = web_safe_nbh(notebook_id)
         variant = Variant.for_accelerator(accelerator)
@@ -390,10 +390,9 @@ class ColabBackendClient:
         """Issue a request to a runtime's Jupyter proxy (header-only proxy-token auth).
 
         The runtime proxy authenticates with the ``X-Colab-Runtime-Proxy-Token`` header
-        (verified header-only in Phase A §①), NOT the OAuth bearer the assign/unassign
-        endpoints use — so this deliberately does not route through ``_send``. It is the
-        shared primitive for kernel interrupt (§5.3) and the contents-API file transfer
-        (Pillar 3a). Returns the response as-is so callers map status codes themselves.
+        rather than the OAuth bearer that the assign and unassign endpoints use, so this
+        deliberately does not route through ``_send``. It is shared by kernel interrupts
+        and Contents API file transfers. Callers map response status codes themselves.
         """
         url = f"{proxy_url.rstrip('/')}/{path.lstrip('/')}"
         merged = {**self.proxy_kernel_headers(proxy_token), **(headers or {})}
@@ -409,8 +408,7 @@ class ColabBackendClient:
     async def interrupt_kernel(self, proxy_url: str, kernel_id: str, *, proxy_token: str) -> None:
         """Interrupt the running cell on a kernel via the proxy REST API.
 
-        Live-verified in Phase A §④ (HTTP 204). Lets an agent stop a runaway cell
-        without killing the whole runtime.
+        This lets a caller stop a runaway cell without killing the whole runtime.
         """
         resp = await self.proxy_request(
             "POST", proxy_url, f"/api/kernels/{kernel_id}/interrupt", proxy_token=proxy_token
@@ -424,7 +422,7 @@ class ColabBackendClient:
     async def keep_alive(self, endpoint: str, *, use_bearer: bool = False) -> None:
         """Send one KeepAliveAssignment RPC.
 
-        NOTE: live-confirmed UNUSABLE under token auth (PHASE0-FINDINGS §2) —
+        This RPC is unusable under token authentication:
         ``use_bearer=False`` (API-key-only) returns HTTP 401 ("API keys are not
         supported by this API"), and ``use_bearer=True`` returns HTTP 403 (no
         serviceusage permission on Colab's project). The browser web client only
@@ -450,10 +448,9 @@ class ColabBackendClient:
         frontend host (matching ``_send``); without it the tunnel front-end returns HTTP 400.
         Unlike the RuntimeService RPC (:meth:`keep_alive`, unusable under token auth), this
         works with the ordinary bearer token. The tunnel holds the request open, so the
-        official client treats a ``ReadTimeout`` as **success** (the lease is refreshed
-        server-side regardless) — we do the same. A non-timeout, non-2xx response is a real
-        failure. Live-validate it holds a runtime past idle before trusting it (see
-        ``spikes/phase_b_keepalive.py``).
+        official client treats a ``ReadTimeout`` as **success** because the lease is refreshed
+        server-side regardless. A non-timeout, non-2xx response is a failure. This operation
+        does not provide a supported guarantee that the runtime will remain past its idle limit.
         """
         url = f"{self._domain}{TUN_ENDPOINT}/{endpoint}/keep-alive/"
         headers = {**await self._auth_headers(), TUNNEL_HEADER: TUNNEL_HEADER_VALUE}
@@ -462,7 +459,7 @@ class ColabBackendClient:
                 url, params={"authuser": "0"}, headers=headers, timeout=timeout
             )
         except httpx.ReadTimeout:
-            return  # the tunnel held the connection open → lease refreshed → success
+            return  # the tunnel held the connection open, so the lease was refreshed
         if not resp.is_success:
             raise KeepAliveError(
                 f"tunnel keep-alive failed for {endpoint!r}: "

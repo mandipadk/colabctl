@@ -6,9 +6,8 @@ against this with a pinned-version probe; this is the native-side counterpart: r
 JSON response to its **shape** (keys + value *types*, values discarded) and hash it, so a
 drift changes the fingerprint while ordinary value variation (tokens, endpoints) does not.
 
-Pure and dependency-free so the scheduled canary (``spikes/canary.py``) — and, later,
-the transports themselves — can fingerprint a live response and compare it to a committed
-baseline, alerting on drift instead of letting users discover breakage.
+The helpers are pure and dependency-free, so callers can fingerprint a live response and
+compare it with a previously reviewed shape before using the response.
 """
 
 from __future__ import annotations
@@ -39,6 +38,46 @@ def structural_fingerprint(obj: Any) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
 
 
+def structural_snapshot(
+    responses: dict[str, Any],
+) -> tuple[dict[str, str | None], dict[str, Skeleton]]:
+    """Capture fingerprints and reviewable skeletons without normalizing either twice."""
+    fingerprints = {
+        name: structural_fingerprint(response) if response is not None else None
+        for name, response in responses.items()
+    }
+    skeletons = {
+        name: structural_skeleton(response) if response is not None else None
+        for name, response in responses.items()
+    }
+    return fingerprints, skeletons
+
+
+def compare_structural_snapshot(
+    fingerprints: dict[str, str | None],
+    skeletons: dict[str, Skeleton],
+    baseline: dict[str, Any] | None,
+) -> tuple[bool, list[str]]:
+    """Compare a captured snapshot with a reviewed baseline and fail closed on gaps."""
+    if baseline is None:
+        return False, ["required baseline is missing"]
+    baseline_fingerprints = baseline.get("fingerprints")
+    baseline_skeletons = baseline.get("skeletons")
+    if not isinstance(baseline_fingerprints, dict) or not isinstance(baseline_skeletons, dict):
+        return False, ["baseline must contain fingerprint and skeleton mappings"]
+
+    drift: list[str] = []
+    for key in sorted(baseline_fingerprints.keys() - fingerprints.keys()):
+        drift.append(f"{key} missing from captured responses")
+    for key in sorted(fingerprints.keys() - baseline_fingerprints.keys()):
+        drift.append(f"{key} has no reviewed baseline")
+    for key in sorted(fingerprints.keys() & baseline_fingerprints.keys()):
+        if fingerprints[key] != baseline_fingerprints[key]:
+            differences = skeleton_diff(baseline_skeletons.get(key), skeletons.get(key))
+            drift.append(f"{key} DRIFTED: {differences}")
+    return (not drift), (drift or ["shapes match baseline"])
+
+
 def skeleton_diff(old: Skeleton, new: Skeleton, *, path: str = "") -> list[str]:
     """Human-readable differences between two skeletons (``+added``, ``-removed``, ``~changed``)."""
     diffs: list[str] = []
@@ -59,4 +98,10 @@ def skeleton_diff(old: Skeleton, new: Skeleton, *, path: str = "") -> list[str]:
     return diffs
 
 
-__all__ = ["skeleton_diff", "structural_fingerprint", "structural_skeleton"]
+__all__ = [
+    "compare_structural_snapshot",
+    "skeleton_diff",
+    "structural_fingerprint",
+    "structural_skeleton",
+    "structural_snapshot",
+]

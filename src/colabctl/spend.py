@@ -1,8 +1,7 @@
 """Pre-allocation spend guard for Colab compute units.
 
-An autonomous agent loop must not be able to run an account's balance to zero by
-accident — the directive's "hard spend caps" applied to Colab's currency. Using the
-verified ``ccu-info`` shape (balance, hourly burn, entitled accelerators), this classifies
+An autonomous agent loop should not run an account's balance to zero by accident. Using the
+``ccu-info`` shape (balance, hourly burn, entitled accelerators), this classifies
 a requested allocation into **blockers** (refuse unless explicitly overridden) and
 **warnings** (surface, but proceed). Pure and transport-agnostic; the CLI wires it in
 front of native allocate, where ``ccu-info`` is available.

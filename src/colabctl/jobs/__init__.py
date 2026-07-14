@@ -1,6 +1,6 @@
 """Detached jobs — submit work that survives the client, the connection, and reclaim.
 
-The substrate (Pillar 2): a job's code is written to the runtime and launched as a
+The job's code is written to the runtime and launched as a
 **detached supervised process** under ``<remote_dir>/`` (see :mod:`colabctl.jobs.codes`),
 so the kernel stays a control plane — short execs poll, tail, and cancel — and the job's
 truth lives on the VM's disk, reachable from any process. :class:`KernelJobRuntime`

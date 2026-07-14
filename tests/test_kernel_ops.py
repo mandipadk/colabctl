@@ -1,4 +1,4 @@
-"""Kernel-level ops: output cap (§5.9), kernel_id exposure + reconnect (§5.6)."""
+"""Test kernel output caps, kernel ID exposure, and reconnect behavior."""
 
 from __future__ import annotations
 

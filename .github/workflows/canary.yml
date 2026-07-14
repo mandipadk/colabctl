@@ -1,25 +1,25 @@
 name: colab-canary
 
-# Daily live canary: detects Google /tun/m/* protocol drift + end-to-end breakage before
-# users do, and files/updates a GitHub issue on failure. Opt-in — skips cleanly unless the
-# GOOGLE_ADC_JSON secret is set (an exported ADC `application_default_credentials.json` for
-# a Colab Pro account, scoped per `colabctl auth scopes`). Costs a few compute-unit-minutes
-# per run. (Drift is the dominant external risk; a weekly cadence left up to ~6 days of
-# undetected breakage.)
+# Daily compatibility check for the custom Colab transport. It skips cleanly unless
+# GOOGLE_ADC_JSON contains exported Application Default Credentials for a Colab account.
 
 on:
   schedule:
     - cron: "0 14 * * *" # daily 14:00 UTC
   workflow_dispatch: {}
 
+concurrency:
+  group: colab-canary
+  cancel-in-progress: false
+
 jobs:
   canary:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
-      issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Gate on credentials
         id: gate
@@ -27,29 +27,28 @@ jobs:
           ADC: ${{ secrets.GOOGLE_ADC_JSON }}
         run: |
           if [ -z "$ADC" ]; then
-            echo "GOOGLE_ADC_JSON not set — skipping canary."
+            echo "GOOGLE_ADC_JSON not set; skipping canary."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install uv
         if: steps.gate.outputs.skip != 'true'
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
       - name: Write ADC credentials
         if: steps.gate.outputs.skip != 'true'
         env:
           ADC: ${{ secrets.GOOGLE_ADC_JSON }}
         run: |
+          umask 077
           mkdir -p "$HOME/.config/gcloud"
           printf '%s' "$ADC" > "$HOME/.config/gcloud/application_default_credentials.json"
 
       - name: Assert baseline integrity
         if: steps.gate.outputs.skip != 'true'
         run: |
-          # The canary auto-establishes a baseline when one is missing and reports HEALTHY,
-          # which would silently disable drift detection. Fail loudly if it's absent.
-          test -f spikes/canary-baseline.json || {
-            echo "::error::spikes/canary-baseline.json is missing — drift detection would silently re-baseline"
+          test -f tests/fixtures/colab_protocol_baseline.json || {
+            echo "::error::tests/fixtures/colab_protocol_baseline.json is missing"
             exit 1
           }
 
@@ -58,21 +57,31 @@ jobs:
         env:
           COLABCTL_ENABLE_NATIVE: "1"
           COLABCTL_QUOTA_PROJECT: ${{ secrets.COLABCTL_QUOTA_PROJECT }}
-        run: uv run --extra native python spikes/canary.py
+        run: uv run --extra native python .github/canary/run.py
 
-      - name: File/update a failure issue
-        if: failure() && steps.gate.outputs.skip != 'true'
+      - name: Remove ADC credentials
+        if: always() && steps.gate.outputs.skip != 'true'
+        run: rm -f "$HOME/.config/gcloud/application_default_credentials.json"
+
+  report-failure:
+    needs: canary
+    if: ${{ always() && needs.canary.result != 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: File or update a failure issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          title="Canary failed — possible Colab /tun/m/* drift or outage"
+          title="Canary failed: possible Colab /tun/m/* drift or outage"
           body="The daily canary failed: ${RUN_URL}
 
-          This usually means Google changed the Colab protocol (the canary's fingerprint
-          drifted) or an end-to-end break (allocate / execute / transfer / teardown). Check
-          the run, compare against spikes/canary-baseline.json, and re-baseline only after
-          confirming the new shape is correct."
+          This usually means Google changed the Colab protocol or an end-to-end operation
+          failed. Check the run, compare against tests/fixtures/colab_protocol_baseline.json,
+          and update the baseline only after confirming the new shape is correct."
           existing=$(gh issue list --search "Canary failed in:title" --state open \
             --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then

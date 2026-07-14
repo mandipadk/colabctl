@@ -1,4 +1,4 @@
-"""Experiment-tracking core: env resolution, autolog preambles, lineage (Phase 4.10.5)."""
+"""Test tracking environment resolution, autolog preambles, and lineage."""
 
 from __future__ import annotations
 

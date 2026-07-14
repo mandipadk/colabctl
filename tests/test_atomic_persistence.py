@@ -1,8 +1,7 @@
-"""Crash-safety + locking for the shared fs primitives and the encrypted secret store.
+"""Crash safety and locking for shared filesystem primitives and encrypted secrets.
 
-Covers the Phase-0.4 fix: ``EncryptedFileSecretStore`` writes must be atomic (a crash
-mid-write cannot corrupt the existing store) and lock-guarded, on the exact headless/CI
-path the store exists for.
+``EncryptedFileSecretStore`` writes must be atomic, so a crash mid-write cannot corrupt
+the existing store, and lock-guarded on its headless and CI paths.
 """
 
 from __future__ import annotations

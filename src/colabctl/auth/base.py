@@ -2,7 +2,7 @@
 
 An :class:`AuthProvider` yields a fresh OAuth bearer token (with the Colab scopes)
 on demand. Transports depend only on this; concrete providers (ADC, OAuth2-loopback,
-static) are swappable. The Colab scope set is the one verified in Phase 0 — note
+static) are swappable. The Colab scope set has been checked against the provider contract. Note
 that ``colaboratory`` is not third-party-grantable, so ADC (gcloud's client) is the
 working path; ``cloud-platform`` is additionally required by gcloud itself.
 """

@@ -114,7 +114,7 @@ async def test_run_all_fail_raises():
         await router.run(JobSpec(code="x", accelerator=Accelerator.T4))
 
 
-# --- cheapest-first cost routing (Phase 2a) ---------------------------------
+# --- cheapest-first cost routing -------------------------------------------
 
 
 def _priced_router():

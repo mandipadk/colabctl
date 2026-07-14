@@ -1,4 +1,4 @@
-"""Spot-risk source (Phase 2c) — contract-tested against a captured AWS-feed shape."""
+"""Contract tests for the spot-risk source using a captured AWS feed shape."""
 
 from __future__ import annotations
 

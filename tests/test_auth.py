@@ -15,7 +15,7 @@ def test_colab_scopes_include_colaboratory():
 
 
 def test_adc_login_scopes_include_cloud_platform():
-    # gcloud refuses ADC login without cloud-platform (Phase 0 finding).
+    # gcloud refuses ADC login without the cloud-platform scope.
     assert "https://www.googleapis.com/auth/cloud-platform" in ADC_LOGIN_SCOPES
     assert "https://www.googleapis.com/auth/colaboratory" in ADC_LOGIN_SCOPES
 

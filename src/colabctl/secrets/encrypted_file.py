@@ -2,9 +2,9 @@
 
 Secrets are stored in a single file encrypted with Fernet (AES-128-CBC + HMAC),
 keyed by a scrypt-derived key from a passphrase (constructor arg or the
-``COLABCTL_SECRET_PASSPHRASE`` env var). The file is created ``0600``. This is the
-``both``-deployment path chosen for Phase 1: desktops use the keychain, servers/CI
-use this. ``cryptography`` is imported lazily so the core stays light.
+``COLABCTL_SECRET_PASSPHRASE`` env var). The file is created ``0600``. Desktops can use the
+keychain, while servers and CI can use this store. ``cryptography`` is imported lazily so the
+core stays light.
 """
 
 from __future__ import annotations

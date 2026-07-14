@@ -1,8 +1,7 @@
-"""Chunked file transfer over the runtime's Jupyter contents/files REST API (Pillar 3a).
+"""Chunked file transfer over the runtime's Jupyter Contents and Files REST APIs.
 
-Replaces the kernel-base64 path — capped near the websocket message limit (~10 MiB) and
-carrying the whole payload as a code literal — with the proxy REST surface verified
-header-only in Phase A §①.
+This replaces the kernel-base64 path, which is capped near the websocket message limit
+(~10 MiB) and carries the whole payload as a code literal, with the proxy REST surface.
 
 * **Upload** uses the Jupyter contents *chunked-PUT* protocol (the exact contract
   JupyterLab uses): one PUT per chunk, ``chunk`` field = ``1, 2, …`` for all but the
@@ -13,9 +12,8 @@ header-only in Phase A §①.
   HTTP Range (bounded memory), and falls back to a single contents GET (base64) when it
   does not — so it is correct everywhere and streaming where possible.
 
-The chunked-upload and ranged-download paths beyond a single request are exercised by
-unit tests against a faithful API simulator and are flagged for live validation
-(``spikes/phase_a_runtime.py transfer``); the single-PUT/GET paths are Phase-A-validated.
+Unit tests exercise chunked uploads and ranged downloads beyond a single request against
+a faithful API simulator.
 """
 
 from __future__ import annotations
@@ -29,7 +27,7 @@ import httpx
 from colabctl.errors import FileTransferError
 from colabctl.transport.native.client import ColabBackendClient
 
-#: ``on_progress(bytes_done, total_bytes)`` — total may be 0 if unknown.
+#: ``on_progress(bytes_done, total_bytes)``; total may be 0 if unknown.
 ProgressCallback = Callable[[int, int], None]
 
 _DEFAULT_CHUNK = 4 * 1024 * 1024  # 4 MiB per request

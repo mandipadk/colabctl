@@ -1,6 +1,6 @@
 """The on-disk state store: one JSON document, atomic writes, cross-process safe.
 
-Design constraints (from the 1x→10x plan, Pillar 1):
+Design constraints:
 
 * **Atomic** — writes go to a temp file in the same directory, are ``fsync``'d, then
   ``os.replace``'d into place, so a reader (or a crash) never sees a half-written
@@ -135,7 +135,7 @@ class StateStore:
         with self.transaction() as doc:
             return doc.jobs.pop(job_id, None) is not None
 
-    # -- spend ledger (cross-backend USD; Phase 2 cost engine) ---------------
+    # -- spend ledger (cross-backend USD) ------------------------------------
 
     def record_spend(self, record: SpendRecord) -> None:
         with self.transaction() as doc:
@@ -147,7 +147,7 @@ class StateStore:
     def total_spend_usd(self, *, since: datetime | None = None) -> float:
         return sum(r.est_cost_usd for r in self.load().spend if since is None or r.at >= since)
 
-    # -- audit ledger (lifecycle + cost; Phase 4 evidence layer) -------------
+    # -- audit ledger (lifecycle + cost) -------------------------------------
 
     def record_audit(self, event: AuditEvent) -> None:
         with self.transaction() as doc:

@@ -1,11 +1,10 @@
-"""``DetachedColabBackend`` — durable, cross-process Colab jobs (Pillar 2).
+"""``DetachedColabBackend`` for cross-process Colab jobs.
 
 The durable counterpart to the synchronous :class:`~colabctl.backends.colab.ColabBackend`:
 ``submit`` allocates a runtime, launches the work as a **detached supervised process**
 (see :mod:`colabctl.jobs`), persists a :class:`~colabctl.state.StoredJob`, and returns —
 leaving the runtime running. ``status``/``logs``/``result``/``cancel`` then work from
-**any process** by reading the record and reattaching the session (native transport,
-Pillar 1). That is the "submit → close the laptop → collect later" promise.
+**any process** by reading the record and reattaching the session through the custom transport.
 
 It deliberately does **not** release the runtime on completion: the job's logs live on
 the VM, and the runtime is a reusable resource. Teardown is the caller's explicit act
@@ -404,7 +403,7 @@ class DetachedColabBackend(Backend):
         ``RuntimeUnavailableError`` is the transport's definite "runtime gone" signal
         (native ``refresh_assignment`` raises it when the assignment is no longer live).
         For a ``resumable`` job we re-allocate a fresh runtime and relaunch the same
-        spec — the workload is expected to resume from its own checkpoint (plan Pillar 2).
+        spec. The workload is expected to resume from its own external checkpoint.
         Non-resumable jobs surface the error so the caller decides.
         """
         try:

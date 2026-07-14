@@ -1,4 +1,4 @@
-"""colabctl Hydra launcher plugin (Phase 4.10.5, part 4).
+"""Tests for the colabctl Hydra launcher plugin.
 
 Tests the hydra-free core (the job-runner builder) + the critical namespace-package layout.
 The launcher itself imports hydra and submits live Colab jobs, so its end-to-end path is

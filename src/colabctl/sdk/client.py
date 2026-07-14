@@ -2,9 +2,9 @@
 
 The developer-facing async API over the :class:`TransportAdapter` contract. By
 default it uses the sanctioned ``cli`` transport; pass ``transport="native"`` to
-use the from-scratch ``/tun/m/*`` transport (opt-in). Both speak the same contract,
-so this layer is transport-agnostic — and when the provider abstraction lands,
-non-Colab backends slot in under the same ``Client`` without changing this API.
+use the custom ``/tun/m/*`` transport (opt-in). Both speak the same contract, so this
+layer is transport-agnostic. Batch providers use the separate
+:class:`~colabctl.backends.base.Backend` interface.
 
 Example::
 

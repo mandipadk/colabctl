@@ -1,4 +1,4 @@
-"""ADC auth provider — the Phase 0-verified working path.
+"""Application Default Credentials provider for Colab and Google APIs.
 
 Uses Application Default Credentials (``gcloud auth application-default login
 --scopes=…colaboratory``). ``google.auth`` is sync, so refreshes run in a thread;

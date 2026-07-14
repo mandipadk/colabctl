@@ -1,10 +1,10 @@
 """Browser-bridge transport over Colab's "local MCP server" (ColabMCP).
 
-Phase A (2026-06-11) captured the real protocol: Colab connects to a local WebSocket
+Colab connects to a local WebSocket
 (subprotocol ``mcp``, token via ``?access_token=``) and acts as the MCP *server*, exposing
 notebook tools (``add_code_cell``, ``run_code_cell``, ``get_cells``, …). This transport is
 the MCP *client*: it drives a Colab notebook through those tools via the user's logged-in
-browser tab — a **sanctioned, first-party** path (not the reverse-engineered ``/tun/m/*``)
+browser tab. It is a **sanctioned, first-party** path alongside the custom ``/tun/m/*``
 that also keeps the runtime alive, because running a no-op cell is genuine kernel activity
 in the **authenticated session** (the one keep-alive that works where token auth cannot).
 

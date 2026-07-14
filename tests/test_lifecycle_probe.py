@@ -1,4 +1,4 @@
-"""Probe-based reclaim detection (§5.4) + keep-alive tick hardening (§5.5).
+"""Probe-based reclaim detection and keep-alive tick hardening.
 
 The lifecycle manager must not destroy a warm runtime on a transient transport blip:
 when the transport exposes ``is_live``, ambiguous errors are probed and retried in
@@ -127,7 +127,7 @@ async def test_probe_failure_falls_back_to_reassign():
     await mgr.stop()
 
 
-# -- keep-alive tick (§5.4 in the loop, §5.5 ping gate) ------------------------
+# -- keep-alive tick and ping gate -------------------------------------------
 
 
 async def test_tick_failure_with_live_runtime_does_not_reassign():

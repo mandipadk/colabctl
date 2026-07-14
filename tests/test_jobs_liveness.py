@@ -1,4 +1,4 @@
-"""Process liveness (Phase 1.6.3): a runner killed without writing exit_code -> FAILED.
+"""A runner killed without writing an exit code must resolve to FAILED.
 
 Before this, a status.json stuck at 'running' (OOM/SIGKILL'd runner) made the job lie
 RUNNING forever. The poll snapshot now carries runner_alive, and a 'running' snapshot whose

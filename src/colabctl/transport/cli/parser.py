@@ -2,7 +2,7 @@
 
 The CLI has no ``--json`` mode, so this module is the single source of truth for
 turning its printed lines into typed models. Every pattern here is grounded in
-the live Phase 0 transcript and the CLI's ``session.py::_format_session_line``
+observed CLI output and the CLI's ``session.py::_format_session_line``
 (the CLI's own single source of truth for display lines). It is pinned to CLI
 **v0.5.7**; a contract change should surface as a :class:`ParseError`, never a
 silent mis-parse.

@@ -1,4 +1,4 @@
-"""Runtime-side Google Drive transfer — checkpoint straight from the VM (Pillar 3b).
+"""Runtime-side Google Drive transfer: checkpoint straight from the VM.
 
 Cuts the laptop out of the checkpoint loop. The old ``drive_checkpoint_hooks`` moved
 every byte runtime → local tempfile → Drive (and back); for real ML state (GB of

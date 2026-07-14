@@ -1,4 +1,4 @@
-"""Append-only lifecycle+cost audit ledger (Phase 4.10.1)."""
+"""Tests for the append-only lifecycle and cost audit ledger."""
 
 from __future__ import annotations
 

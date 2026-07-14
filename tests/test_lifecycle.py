@@ -51,7 +51,7 @@ class ExpiringTransport(CountingTransport):
 
 
 class RefreshableTransport(ExpiringTransport):
-    """Near-expiry, but can refresh the proxy token in place (§5.10)."""
+    """Near expiry, but able to refresh the proxy token in place."""
 
     def __init__(self, remaining, *, refresh_ok=True):
         super().__init__(remaining)

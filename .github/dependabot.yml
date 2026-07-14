@@ -11,7 +11,7 @@ updates:
       python:
         patterns: ["*"]
 
-  # GitHub Actions used by CI / canary / publish.
+  # GitHub Actions used by CI, compatibility checks, docs, and publishing.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

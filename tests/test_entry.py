@@ -1,4 +1,4 @@
-"""Friendly missing-extra errors for the console-script launchers (Phase 0.8 sliver).
+"""Friendly missing-extra errors for the console-script launchers.
 
 A bare install must give a clear 'install this extra' message + non-zero exit, not a raw
 traceback; an unrelated import failure must NOT be masked as a missing extra.

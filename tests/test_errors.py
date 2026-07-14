@@ -1,4 +1,4 @@
-"""Coded errors: stable codes, categories, remediation hints, to_dict (Phase 3.9.2)."""
+"""Test stable error codes, categories, remediation hints, and serialization."""
 
 from __future__ import annotations
 

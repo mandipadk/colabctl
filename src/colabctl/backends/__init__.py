@@ -6,7 +6,7 @@
 - :class:`VertexBackend` — sanctioned, headless, deadline-bound GPU jobs.
 - :class:`BackendRouter` — selects a backend by capability and fails over on infra errors.
 
-HF Jobs / Kaggle / IaaS are registered-but-deferred (Phase 4).
+Hugging Face Jobs, Kaggle, RunPod, and Vast.ai are registered through the backend factory.
 """
 
 from __future__ import annotations

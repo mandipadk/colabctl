@@ -55,7 +55,7 @@ runtime is reclaimed (bounded by an incarnation cap to avoid cost runaway).
 |---|---|
 | `colabctl notebook run nb.ipynb --param k=v --gpu T4 [--detach] [--out executed.ipynb]` | Papermill-style parameterized notebook execution on a remote GPU; emits an executed `.ipynb`. |
 
-## Cost & spend (Phase 2 cost engine)
+## Cost and spend
 
 | Command | What it does |
 |---|---|

@@ -1,9 +1,9 @@
-"""Auto-resume of resumable detached jobs on runtime reclamation (Pillar 2).
+"""Test resumable detached jobs after runtime reclamation.
 
 A scripted transport returns framed poll/launch responses and can inject a reclaim
 (``RuntimeUnavailableError``, the native transport's definite "runtime gone" signal).
 The backend should re-allocate + relaunch a *resumable* job and surface the error for a
-non-resumable one — without running any real subprocess.
+non-resumable one without running any real subprocess.
 """
 
 from __future__ import annotations

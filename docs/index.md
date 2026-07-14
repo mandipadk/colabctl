@@ -1,78 +1,102 @@
 # colabctl
 
-Programmatic control of **Google Colab** for developers and AI agents — allocate
-GPU/TPU runtimes, run code and notebooks, stream outputs, and sync files, **without
-ever touching the Colab website manually.**
+colabctl controls Google Colab and other GPU providers from Python, the terminal, or an AI
+agent. It supports interactive runtimes, parameterized notebooks, detached Colab processes, and
+batch jobs across Colab, Modal, Vertex AI, Hugging Face Jobs, Kaggle, RunPod, and Vast.ai.
+
+The project is in active development. Check the
+[public roadmap](https://github.com/mandipadk/colabctl/blob/main/ROADMAP.md) before depending on a
+backend's live-validation or durability level.
 
 ## Install
 
 ```bash
-# library (add the extras you need)
-pip install colabctl
-pip install "colabctl[cli,sdk,native,secrets]"
-
-# or as a CLI tool — exposes `colabctl` and `colabctl-mcp`
 uv tool install "colabctl[cli,sdk]"
+# or install every optional integration
+uv tool install "colabctl[all]"
 ```
 
-Bleeding edge: `pip install "colabctl[all] @ git+https://github.com/mandipadk/colabctl.git"`.
+Python 3.12 or newer is required. Optional extras are `cli`, `sdk`, `native`, `browser`, `drive`,
+`secrets`, `mcp`, `modal`, `vertex`, `hf`, `kaggle`, and `runpod`.
 
-Optional extras: `cli`, `sdk`, `native`, `secrets`, `mcp`, `drive`, `modal`, `vertex`,
-`hf`, `browser` (or `all`).
+## Authenticate
 
-## Quickstart (SDK)
+```bash
+colabctl auth login
+colabctl auth status
+colabctl doctor
+```
+
+Drive operations also need a Google Cloud quota project with the Drive API enabled. See
+[Deployment and operations](deployment.md) for the exact setup.
+
+## Python SDK
 
 ```python
 import asyncio
 from colabctl import ColabClient
 
 async def main():
-    async with ColabClient() as colab:                       # sanctioned CLI transport by default
+    async with ColabClient() as colab:
         async with await colab.allocate(gpu="T4") as gpu:
-            r = await gpu.run("import torch; print(torch.cuda.get_device_name(0))")
-            print(r.text)
+            result = await gpu.run(
+                "import torch; print(torch.cuda.get_device_name(0))"
+            )
+            print(result.text)
 
 asyncio.run(main())
 ```
 
-## Quickstart (CLI)
+## CLI
 
 ```bash
-colabctl run train.py --gpu A100,L4,T4         # one-shot with a fallback ladder
-colabctl quota                                 # compute-unit balance + burn rate
-colabctl job run train.py --backend modal --gpu A100 --req torch
+colabctl run train.py --gpu A100,L4,T4
+colabctl new --gpu T4 --name experiment
+colabctl exec --session experiment --code "print(2**10)"
+colabctl stop experiment
 
-# durable detached job — survives your client exiting / a disconnect / reclamation:
-id=$(colabctl -t native job run train.py --detach --resumable --gpu A100,L4,T4)
-colabctl -t native job logs -f "$id"           # follow; resumes exactly after a disconnect
-colabctl -t native job result "$id"
+colabctl job run train.py --backend modal --gpu A100 --req torch
+colabctl job backends
 ```
 
-`-t native` opts into the from-scratch transport; `-t browser` drives a Colab notebook
-through Colab's own MCP tools via a logged-in tab (sanctioned, and the one path that keeps
-its runtime alive).
+## Custom Colab transport
 
-## For AI agents (MCP)
+The official CLI transport is the default. Enable the custom transport when you need its
+cross-process session and detached-job features:
+
+```bash
+export COLABCTL_ENABLE_NATIVE=1
+colabctl --transport native new --gpu T4 --name experiment
+colabctl --transport native attach experiment
+```
+
+Detached jobs continue on the same runtime after the submitting shell disconnects. A later poll
+can relaunch a resumable job after runtime loss, but the application must save and restore its
+own external checkpoint. See [Deployment and operations](deployment.md) for the complete
+limitations.
+
+## AI agents
+
+Install the MCP integration with `uv tool install "colabctl[cli,mcp]"`, then configure the
+local server:
 
 ```json
-{ "mcpServers": { "colabctl": { "command": "colabctl-mcp" } } }
+{
+  "mcpServers": {
+    "colabctl": {
+      "command": "colabctl-mcp"
+    }
+  }
+}
 ```
 
-Exposes interactive Colab tools (`allocate_runtime`, `run_code`, `interrupt_runtime`) plus
-the submit→poll job set (`submit_job`, `job_status`, `job_logs`, `job_result`, `cancel_job`)
-and `run_job` / `list_backends` across the Colab, Modal, and Vertex backends.
+The server exposes runtime allocation, code execution, file operations, and batch-job tools.
+It runs with the filesystem and provider credentials of its process.
 
-## Authentication
+## Continue reading
 
-The Colab paths use Google Application Default Credentials — **one-time per machine**:
-
-```bash
-colabctl auth login     # runs the gcloud ADC login with the scopes colabctl needs
-colabctl auth status    # account · scopes · Drive quota project · what to fix
-```
-
-For **runtime-direct Drive checkpoints**, ADC user credentials also need a quota project
-with the Drive API enabled (`gcloud auth application-default set-quota-project YOUR_PROJECT`;
-`auth status` flags it, and colabctl auto-detects it).
-
-See [Architecture](architecture.md) for how the pieces fit together.
+- [Examples](examples.md)
+- [Backends](backends.md)
+- [Architecture](architecture.md)
+- [API reference](api.md)
+- [Deployment and operations](deployment.md)

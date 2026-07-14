@@ -1,7 +1,7 @@
-"""The AllocationGate: bounded (re-)allocation with exponential backoff.
+"""Test bounded allocation and reallocation with exponential backoff.
 
-The safety primitive behind Phase-0.2 — proves the cap raises and the backoff schedule is
-what the resume/reassign paths rely on to not become a GPU cost-runaway.
+The cap and backoff schedule prevent resume and reassignment paths from allocating
+unbounded GPU runtimes.
 """
 
 from __future__ import annotations

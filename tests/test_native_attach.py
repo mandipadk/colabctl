@@ -1,7 +1,7 @@
 """Cross-process durability for NativeColabTransport: attach, truthful stop, gc.
 
 Two transports sharing one ``StateStore`` (and one fake backend client) stand in for
-two ``colabctl`` processes. These guard the Pillar-1 fixes: a session created in one
+two ``colabctl`` processes. These ensure that a session created in one
 process is attachable from another, ``stop`` never silently no-ops (the v0.2 leak), and
 ``gc`` reconciles/reclaims. No network, no real keychain/home.
 """
@@ -296,7 +296,7 @@ async def test_gc_default_is_non_destructive_to_orphans(state: StateStore) -> No
     assert "gpu-orphan" in gc.reconcile.orphan_endpoints  # reported, not touched
 
 
-# -- is_live probe + bounded keep-alive ping (§5.4 / §5.5) ----------------------
+# -- is_live probe and bounded keep-alive ping -------------------------------
 
 
 async def test_is_live_true_false_and_unknown(state: StateStore) -> None:
@@ -325,10 +325,10 @@ async def test_keep_alive_ping_is_time_bounded(state: StateStore) -> None:
     assert kernels and kernels[0].codes == ["None"]
     assert kernels[0].timeouts == [pytest.approx(30.0)]  # _KEEPALIVE_PING_TIMEOUT_S
     (timeout,) = kernels[0].timeouts
-    assert timeout is not None and timeout <= 30  # bounded — can't wedge the loop (§5.5)
+    assert timeout is not None and timeout <= 30  # bounded so it cannot block the loop
 
 
-# -- interrupt (§5.3) + reconnect (§5.6) --------------------------------------
+# -- interrupt and reconnect -------------------------------------------------
 
 
 async def test_interrupt_calls_client_with_kernel_id(state: StateStore) -> None:

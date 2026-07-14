@@ -1,14 +1,12 @@
-"""The native, from-scratch Colab transport (co-primary, opt-in).
+"""The custom native Colab transport (opt-in).
 
 This package owns colabctl's own implementation of the Colab backend protocol —
 the ``/tun/m/*`` assignment REST flow (:mod:`client`), the Jupyter-websocket
 kernel client (:mod:`kernel`), and the full transport (:mod:`adapter`) — so the
-product is never hostage to the
-immature official CLI (project directive; see ``DIRECTIVES.md``). The recipe was
-verified from Apache-2.0 CLI source in Phase 0 (``spikes/PHASE0-FINDINGS.md`` §3).
+product can use custom transport features without depending on the official CLI process.
+The protocol constants and request shapes are covered by drift-sensitive contract tests.
 
-It is **disabled by default** per the sanctioned-default ToS posture; callers opt
-in explicitly. On keep-alive: live testing (PHASE0-FINDINGS §2) confirmed the
+It is **disabled by default**; callers opt in explicitly. Live testing confirmed the
 RuntimeService keep-alive RPC is unusable from token auth (401 api-key / 403 bearer)
 — only the browser's session cookies work — so this transport keeps runtimes alive
 via kernel activity and relies on checkpoint/re-assign for long jobs.

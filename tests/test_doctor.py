@@ -1,4 +1,4 @@
-"""colabctl doctor — preflight health checks (Phase 4.10.3)."""
+"""Test ``colabctl doctor`` preflight health checks."""
 
 from __future__ import annotations
 

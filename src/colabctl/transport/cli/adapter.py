@@ -1,8 +1,8 @@
 """``ColabCliTransport`` — the sanctioned-default transport over ``google-colab-cli``.
 
 Invokes the ``colab`` executable as an async subprocess and parses its human
-stdout via :mod:`colabctl.transport.cli.parser`. Auth defaults to ``adc`` (the
-Phase 0-verified working path). This transport is intentionally a *thin* adapter:
+stdout via :mod:`colabctl.transport.cli.parser`. Auth defaults to ``adc``. This
+transport is intentionally a *thin* adapter:
 all output understanding lives in the (golden-tested) parser, and the heavier,
 structured-output path lives in the native transport.
 """
@@ -64,7 +64,7 @@ class ColabCliTransport(TransportAdapter):
             file_transfer=True,
             notebook_execution=True,
             caveats=[
-                "Keep-alive is unavailable under ADC (serviceusage 403, Phase 0 §2); "
+                "Keep-alive is unavailable under ADC (the service returns HTTP 403); "
                 "long-running sessions are reclaimed at Colab's idle timeout.",
                 "No machine-readable output; stdout is parsed against pinned "
                 f"CLI v{parser.PINNED_CLI_VERSION}.",

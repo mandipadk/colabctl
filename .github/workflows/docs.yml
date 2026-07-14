@@ -1,8 +1,7 @@
 name: docs
 
-# Build the docs on every PR/push (a strict build EXECUTES the examples, so a broken snippet or
-# dead link fails CI — that is Phase 5.11.3's "CI-tested examples"). Deploy to GitHub Pages only
-# on a push to main.
+# Build the docs on every PR/push. A strict build executes the marked examples, so a broken
+# snippet or dead link fails CI. Deploy to GitHub Pages only on a push to main.
 on:
   push:
     branches: [main]

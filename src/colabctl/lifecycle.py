@@ -1,7 +1,6 @@
 """Runtime-lifecycle manager for long-running Colab sessions.
 
-This is the honest answer to the Phase 0 keep-alive finding: there is no reliable
-token-auth keep-alive RPC, so a durable long-running session is achieved by
+There is no reliable token-auth keep-alive RPC, so a long-running session uses
 
 1. **best-effort keep-alive ticks** — periodic kernel activity (where the transport
    supports it), to defer idle reclamation while a workload is running;
@@ -10,7 +9,7 @@ token-auth keep-alive RPC, so a durable long-running session is achieved by
 3. **automatic re-assign + restore** — when the runtime is *confirmed* reclaimed,
    allocate a fresh one and run a restore hook, then retry. Ambiguous transport errors
    are probed first (the transport's optional ``is_live``) so a network blip never
-   destroys a warm, healthy runtime (§5.4); only a definite or probe-confirmed
+   destroys a warm, healthy runtime; only a definite or probe-confirmed
    reclamation triggers the disruptive path.
 
 Checkpoint/restore *content* is pluggable (the manager orchestrates; the hooks decide
@@ -45,13 +44,13 @@ LifecycleHook = Callable[[TransportAdapter, str], Awaitable[None]]
 #: Observer invoked on each re-assign with (new_session_name, reason).
 ReassignObserver = Callable[[str, str], None]
 #: Gate consulted before each keep-alive activity ping; return ``False`` to skip the
-#: ping this tick (e.g. while a detached job already keeps the kernel busy — §5.5).
+#: ping this tick when a detached job already keeps the kernel busy.
 PingGate = Callable[[], bool]
 
 #: Errors that *may* indicate the runtime is gone. ``RuntimeUnavailableError`` is a
 #: definite reclaim signal (the transport says so); the broader transport/allocation
 #: errors are ambiguous — a network blip raises the same types — so when the transport
-#: can be probed (``is_live``) we check before destroying a warm runtime (plan §5.4).
+#: can be probed (``is_live``) we check before destroying a warm runtime.
 _RECLAIM_ERRORS = (RuntimeUnavailableError, AllocationError, TransportError)
 
 
@@ -84,7 +83,7 @@ class RuntimeLifecycleManager:
         self._gate = gate if gate is not None else AllocationGate()
         self._ping_gate = ping_gate
         # Near proxy-token expiry, prefer a non-disruptive in-place refresh (transports
-        # exposing `refresh_token`, Phase A §②) over a disruptive re-assign. Both default
+        # exposing `refresh_token`) over a disruptive re-assign. Both default
         # off, since the reactive on-failure path already covers expiry; refresh is the
         # cheap proactive option and is tried first when enabled.
         self._refresh_before_expiry = refresh_before_expiry
@@ -186,7 +185,7 @@ class RuntimeLifecycleManager:
           and everything on it — is preserved). If the retry fails again while the
           runtime remains live, the error is real and is surfaced, not "recovered"
           into a destructive re-assign.
-        - Without a probe, fall back to re-assign (the pre-§5.4 behavior).
+        - Without a probe, fall back to reassigning the runtime.
         """
         try:
             return await op()
@@ -232,8 +231,8 @@ class RuntimeLifecycleManager:
     async def _keepalive_tick(self) -> None:
         """One keep-alive cycle: activity ping, optional checkpoint, expiry check.
 
-        The ping is skipped when the ping gate says so (§5.5: a detached job already
-        keeps the kernel busy, and its poller touches the kernel anyway); checkpoints
+        The ping is skipped when the ping gate says so because a detached job may already
+        keep the kernel busy while its poller touches the kernel; checkpoints
         and the expiry check still run.
         """
         if self._name is None:
@@ -250,7 +249,7 @@ class RuntimeLifecycleManager:
                 await self._reassign(reason="runtime-proxy token near expiry")
 
     async def _try_refresh_token(self) -> bool:
-        """Refresh the proxy token in place if the transport supports it (§5.10)."""
+        """Refresh the proxy token in place if the transport supports it."""
         refresh = getattr(self._transport, "refresh_token", None)
         if refresh is None or self._name is None:
             return False
@@ -275,7 +274,7 @@ class RuntimeLifecycleManager:
             except _RECLAIM_ERRORS as exc:
                 # Possibly reclaimed between ticks — but a tick can also fail on a
                 # transient blip (or a bounded ping timeout against a busy kernel),
-                # so probe before the disruptive re-assign (§5.4).
+                # so probe before the disruptive reassign.
                 if await self._runtime_is_live():
                     _log.warning("keepalive: tick failed but runtime is live (%s); skipping", exc)
                     continue
